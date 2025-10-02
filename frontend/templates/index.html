@@ -1,0 +1,1077 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SC-Order - Inventory Management</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <link rel="stylesheet" href="/static/css/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div class="container">
+        <!-- Header -->
+        <header class="header">
+          <div class="logo-section">
+            <div class="logo">SC-Order</div>
+            <div class="breadcrumb">
+              <span>Home</span>
+              <span>/</span>
+              <span id="current-view-breadcrumb" class="breadcrumb-active">Inventory</span>
+            </div>
+          </div>
+          <div class="header-actions">
+            <button onclick="showView('settings')" class="btn btn-ghost">Settings</button>
+            <button onclick="showView('import')" class="btn btn-secondary">Import Excel</button>
+            <button onclick="openProductModal()" class="btn btn-primary">
+              <i class="fas fa-plus"></i>
+              <span>Add Product</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav style="display: flex; gap: 0.5rem; margin-bottom: 2rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0;">
+          <button
+            onclick="showView('products')"
+            class="nav-btn"
+            data-view="products"
+          >
+            <i class="fas fa-list"></i> Products
+          </button>
+          <button
+            onclick="showView('import')"
+            class="nav-btn"
+            data-view="import"
+          >
+            <i class="fas fa-file-import"></i> Import
+          </button>
+          <button
+            onclick="showView('settings')"
+            class="nav-btn"
+            data-view="settings"
+          >
+            <i class="fas fa-cog"></i> Settings
+          </button>
+        </nav>
+
+        <!-- Main Content -->
+        <main>
+        <!-- Products View -->
+        <div id="products-view" class="view-container">
+          <!-- Stats Bar -->
+          <div class="stats-bar">
+            <div class="stat-item">
+              <div class="stat-label">Total Products</div>
+              <div class="stat-value" id="product-count">0</div>
+              <div class="stat-change" id="filtered-count" style="display: none;">
+                <span id="filtered-count-number">0</span> filtered
+              </div>
+            </div>
+
+            <div class="stat-item">
+              <div class="stat-label">Low Stock Items</div>
+              <div class="stat-value" id="low-stock-count">0</div>
+              <div class="stat-change">Needs attention</div>
+            </div>
+
+            <div class="stat-item">
+              <div class="stat-label">Order Value</div>
+              <div class="stat-value">$<span id="order-total">0.00</span></div>
+              <div class="stat-change"><span id="selected-count">0</span> selected</div>
+            </div>
+
+            <div class="stat-item">
+              <div class="stat-label">Store Status</div>
+              <div class="stat-value" style="font-size: 1rem;" id="store-name">Not Connected</div>
+              <div class="stat-change">Shopify connection</div>
+            </div>
+          </div>
+
+          <!-- Toolbar -->
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <div class="search-box">
+                <i class="fas fa-search search-icon"></i>
+                <input
+                  type="text"
+                  id="product-search"
+                  placeholder="Search products..."
+                  class="search-input"
+                  onkeyup="filterProducts()"
+                />
+              </div>
+              <div class="filter-group">
+                <button id="all-filter-btn" onclick="clearOrderFilter()" class="btn btn-ghost">All</button>
+                <button id="order-filter-btn" onclick="toggleOrderFilter()" class="btn btn-ghost">Order</button>
+              </div>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+              <button onclick="syncInventory()" class="btn btn-secondary">
+                <i class="fas fa-sync"></i> Sync Inventory
+              </button>
+              <button onclick="syncPrice()" class="btn btn-secondary">
+                <i class="fas fa-dollar-sign"></i> Sync Price
+              </button>
+              <button onclick="syncSales()" class="btn btn-secondary">
+                <i class="fas fa-chart-line"></i> Sync Sales
+              </button>
+              <button onclick="findMissingProducts()" class="btn btn-secondary">
+                <i class="fas fa-search"></i> Find Missing Products
+              </button>
+              <button
+                id="create-quotation-btn"
+                onclick="openQuotationModal()"
+                class="btn btn-primary"
+                style="display: none;"
+              >
+                <i class="fas fa-file-invoice"></i> Create Quotation
+              </button>
+            </div>
+          </div>
+
+          <!-- Table Card -->
+          <div class="table-card">
+            <div class="table-header">
+              <h2 class="table-title">Product Inventory</h2>
+              <span class="table-meta">Manage and track your inventory levels</span>
+            </div>
+
+            <!-- Products Table -->
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="text-align: center;">
+                      <input
+                        type="checkbox"
+                        id="select-all-checkbox"
+                        onchange="toggleSelectAll()"
+                        class="checkbox"
+                      />
+                    </th>
+                    <th>#</th>
+                    <th onclick="sortProducts('product_name')" style="cursor: pointer;">
+                      Product Name
+                      <i id="sort-icon-product_name" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                    </th>
+                    <th onclick="sortProducts('upc_barcode')" style="cursor: pointer;">
+                      UPC Barcode
+                      <i id="sort-icon-upc_barcode" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                    </th>
+                    <th onclick="sortProducts('threshold_quantity')" style="cursor: pointer;">
+                      Thold
+                      <i id="sort-icon-threshold_quantity" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                    </th>
+                    <th onclick="sortProducts('quantity_per_case')" style="cursor: pointer;">
+                      Case
+                      <i id="sort-icon-quantity_per_case" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                    </th>
+                    <th onclick="sortProducts('price')" style="cursor: pointer;">
+                      Price
+                      <i id="sort-icon-price" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                    </th>
+                    <th onclick="sortProducts('available_quantity')" style="cursor: pointer; text-align: center;">
+                      Stock
+                      <i id="sort-icon-available_quantity" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                    </th>
+                    <th onclick="sortProducts('quantity_sold_last_month')" style="cursor: pointer; text-align: center;">
+                      Order
+                      <i id="sort-icon-quantity_sold_last_month" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                    </th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="products-table-body">
+                  <!-- Products will be loaded here -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Import View -->
+        <div id="import-view" class="view-container hidden">
+          <div class="card">
+            <h2 class="card-title">
+              <i class="fas fa-file-import" style="margin-right: 0.5rem;"></i>
+              Import Products from Excel
+            </h2>
+            <p class="card-description">
+              Upload an Excel file to bulk import products into your inventory.
+            </p>
+
+            <div style="background: rgba(59, 130, 246, 0.1); border-left: 4px solid var(--accent-secondary); padding: 1rem; margin-bottom: 1.5rem; border-radius: 0.5rem;">
+              <p style="font-size: 0.875rem; color: var(--text-secondary);">
+                <i class="fas fa-info-circle" style="margin-right: 0.5rem;"></i>
+                <strong>Required columns:</strong> product_name, upc_barcode<br />
+                <strong>Optional columns:</strong> threshold_quantity, quantity_per_case, price
+              </p>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Select Excel File</label>
+              <input
+                type="file"
+                id="excel-file-input"
+                accept=".xlsx,.xls"
+                class="form-input"
+                style="cursor: pointer;"
+              />
+            </div>
+
+            <button
+              onclick="importExcel()"
+              class="btn btn-primary"
+            >
+              <i class="fas fa-upload"></i> Import Products
+            </button>
+
+            <div id="import-result" style="margin-top: 1.5rem;"></div>
+          </div>
+        </div>
+
+        <!-- Settings View -->
+        <div id="settings-view" class="view-container hidden">
+          <!-- Shopify Integration -->
+          <div class="card">
+            <h2 class="card-title">
+              <i class="fas fa-shopping-bag" style="margin-right: 0.5rem; color: var(--accent-primary);"></i>
+              Shopify Integration
+            </h2>
+            <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+              Connect to your Shopify store(s) for inventory and sales sync.
+            </p>
+
+            <!-- Main Store -->
+            <div style="padding: 1.25rem; background: var(--bg-secondary); border-radius: 0.5rem; border: 2px solid var(--accent-primary); margin-bottom: 1.5rem;">
+              <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem;">
+                <i class="fas fa-star" style="margin-right: 0.5rem; color: var(--accent-primary);"></i>
+                Main Store
+              </h3>
+              <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                Primary store used for inventory sync and sales sync
+              </p>
+
+              <form id="shopify-settings-form" style="display: flex; flex-direction: column; gap: 1rem;">
+                <div class="form-group">
+                  <label class="form-label">Store URL</label>
+                  <input
+                    type="text"
+                    name="shopify_store_url"
+                    placeholder="your-store.myshopify.com"
+                    class="form-input"
+                  />
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Admin API Access Token</label>
+                  <input
+                    type="password"
+                    name="shopify_access_token"
+                    placeholder="shpat_..."
+                    class="form-input"
+                  />
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                  <button
+                    type="button"
+                    onclick="testShopifyConnection()"
+                    class="btn btn-primary"
+                  >
+                    <i class="fas fa-plug"></i> Test Connection
+                  </button>
+                  <button
+                    type="button"
+                    onclick="loadShopifyLocations()"
+                    class="btn btn-secondary"
+                  >
+                    <i class="fas fa-map-marker-alt"></i> Load Locations
+                  </button>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Location</label>
+                  <select
+                    name="shopify_location_id"
+                    class="form-input"
+                  >
+                    <option value="">-- Select a location --</option>
+                  </select>
+                  <p style="font-size: 0.75rem; color: var(--text-tertiary); margin-top: 0.25rem;">
+                    Location for inventory tracking
+                  </p>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Excluded SKU Prefixes</label>
+                  <textarea
+                    name="excluded_skus"
+                    rows="3"
+                    class="form-input"
+                    placeholder="Enter SKU prefixes to exclude (one per line or comma-separated)"
+                  ></textarea>
+                  <p style="font-size: 0.75rem; color: var(--text-tertiary); margin-top: 0.25rem;">
+                    Products with SKUs starting with these prefixes will not appear in "Find Missing Products"
+                  </p>
+                </div>
+              </form>
+            </div>
+
+            <!-- Additional Stores (Collapsible) -->
+            <details style="margin-bottom: 0;">
+              <summary style="cursor: pointer; padding: 1rem; background: var(--bg-secondary); border-radius: 0.5rem; font-weight: 500; display: flex; align-items: center; justify-content: space-between;">
+                <span>
+                  <i class="fas fa-store" style="margin-right: 0.5rem;"></i>
+                  Additional Stores (Optional)
+                  <span style="font-size: 0.875rem; color: var(--text-tertiary); font-weight: normal; margin-left: 0.5rem;">— For sales sync only</span>
+                </span>
+                <i class="fas fa-chevron-down" style="color: var(--text-tertiary);"></i>
+              </summary>
+              <div style="padding: 1rem; margin-top: 1rem;">
+                <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                  Add up to 4 additional Shopify stores to aggregate sales data across multiple locations.
+                </p>
+
+                <!-- Store 2 -->
+                <details class="store-collapsible" style="margin-bottom: 1rem;">
+                  <summary style="cursor: pointer; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 0.375rem; font-weight: 500;">
+                    <i class="fas fa-chevron-right" style="margin-right: 0.5rem; transition: transform 0.2s;"></i>
+                    Store 2
+                  </summary>
+                  <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 0.375rem; margin-top: 0.5rem;">
+                    <div class="form-group">
+                      <label class="form-label">Store URL</label>
+                      <input
+                        type="text"
+                        name="shopify_store_2_url"
+                        placeholder="store-2.myshopify.com"
+                        class="form-input"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Admin API Access Token</label>
+                      <input
+                        type="password"
+                        name="shopify_store_2_token"
+                        placeholder="shpat_..."
+                        class="form-input"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Location</label>
+                      <div style="display: flex; gap: 0.5rem;">
+                        <select name="shopify_store_2_location_id" class="form-input" style="flex: 1;">
+                          <option value="">-- Select a location --</option>
+                        </select>
+                        <button type="button" class="btn btn-secondary" onclick="loadShopifyLocations(2)" style="white-space: nowrap;">
+                          <i class="fas fa-sync-alt"></i> Load
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+
+                <!-- Store 3 -->
+                <details class="store-collapsible" style="margin-bottom: 1rem;">
+                  <summary style="cursor: pointer; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 0.375rem; font-weight: 500;">
+                    <i class="fas fa-chevron-right" style="margin-right: 0.5rem; transition: transform 0.2s;"></i>
+                    Store 3
+                  </summary>
+                  <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 0.375rem; margin-top: 0.5rem;">
+                    <div class="form-group">
+                      <label class="form-label">Store URL</label>
+                      <input
+                        type="text"
+                        name="shopify_store_3_url"
+                        placeholder="store-3.myshopify.com"
+                        class="form-input"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Admin API Access Token</label>
+                      <input
+                        type="password"
+                        name="shopify_store_3_token"
+                        placeholder="shpat_..."
+                        class="form-input"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Location</label>
+                      <div style="display: flex; gap: 0.5rem;">
+                        <select name="shopify_store_3_location_id" class="form-input" style="flex: 1;">
+                          <option value="">-- Select a location --</option>
+                        </select>
+                        <button type="button" class="btn btn-secondary" onclick="loadShopifyLocations(3)" style="white-space: nowrap;">
+                          <i class="fas fa-sync-alt"></i> Load
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+
+                <!-- Store 4 -->
+                <details class="store-collapsible" style="margin-bottom: 1rem;">
+                  <summary style="cursor: pointer; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 0.375rem; font-weight: 500;">
+                    <i class="fas fa-chevron-right" style="margin-right: 0.5rem; transition: transform 0.2s;"></i>
+                    Store 4
+                  </summary>
+                  <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 0.375rem; margin-top: 0.5rem;">
+                    <div class="form-group">
+                      <label class="form-label">Store URL</label>
+                      <input
+                        type="text"
+                        name="shopify_store_4_url"
+                        placeholder="store-4.myshopify.com"
+                        class="form-input"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Admin API Access Token</label>
+                      <input
+                        type="password"
+                        name="shopify_store_4_token"
+                        placeholder="shpat_..."
+                        class="form-input"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Location</label>
+                      <div style="display: flex; gap: 0.5rem;">
+                        <select name="shopify_store_4_location_id" class="form-input" style="flex: 1;">
+                          <option value="">-- Select a location --</option>
+                        </select>
+                        <button type="button" class="btn btn-secondary" onclick="loadShopifyLocations(4)" style="white-space: nowrap;">
+                          <i class="fas fa-sync-alt"></i> Load
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+
+                <!-- Store 5 -->
+                <details class="store-collapsible" style="margin-bottom: 0;">
+                  <summary style="cursor: pointer; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 0.375rem; font-weight: 500;">
+                    <i class="fas fa-chevron-right" style="margin-right: 0.5rem; transition: transform 0.2s;"></i>
+                    Store 5
+                  </summary>
+                  <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 0.375rem; margin-top: 0.5rem;">
+                    <div class="form-group">
+                      <label class="form-label">Store URL</label>
+                      <input
+                        type="text"
+                        name="shopify_store_5_url"
+                        placeholder="store-5.myshopify.com"
+                        class="form-input"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Admin API Access Token</label>
+                      <input
+                        type="password"
+                        name="shopify_store_5_token"
+                        placeholder="shpat_..."
+                        class="form-input"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Location</label>
+                      <div style="display: flex; gap: 0.5rem;">
+                        <select name="shopify_store_5_location_id" class="form-input" style="flex: 1;">
+                          <option value="">-- Select a location --</option>
+                        </select>
+                        <button type="button" class="btn btn-secondary" onclick="loadShopifyLocations(5)" style="white-space: nowrap;">
+                          <i class="fas fa-sync-alt"></i> Load
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+              </div>
+            </details>
+          </div>
+
+          <!-- MS SQL Integration -->
+          <div class="card" style="margin-top: 1.5rem;">
+            <h2 class="card-title">
+              <i class="fas fa-database" style="margin-right: 0.5rem; color: var(--accent-secondary);"></i>
+              MS SQL Integration
+            </h2>
+            <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+              Connect to your MS SQL Server for price synchronization.
+            </p>
+            <form id="mssql-settings-form" style="display: flex; flex-direction: column; gap: 1rem;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                  <label class="form-label">Server</label>
+                  <input
+                    type="text"
+                    name="mssql_server"
+                    placeholder="localhost"
+                    class="form-input"
+                  />
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Port</label>
+                  <input
+                    type="number"
+                    name="mssql_port"
+                    value="1433"
+                    class="form-input"
+                  />
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Database</label>
+                <input
+                  type="text"
+                  name="mssql_database"
+                  placeholder="database_name"
+                  class="form-input"
+                />
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="form-group">
+                  <label class="form-label">Username</label>
+                  <input
+                    type="text"
+                    name="mssql_username"
+                    class="form-input"
+                  />
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Password</label>
+                  <input
+                    type="password"
+                    name="mssql_password"
+                    class="form-input"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onclick="testMSSQLConnection()"
+                class="btn btn-primary"
+              >
+                <i class="fas fa-plug"></i> Test Connection
+              </button>
+            </form>
+          </div>
+
+          <!-- Sales Sync Configuration -->
+          <div class="card" style="margin-top: 1.5rem;">
+            <h2 class="card-title">
+              <i class="fas fa-tag" style="margin-right: 0.5rem; color: var(--accent-primary);"></i>
+              Sales Sync Configuration
+            </h2>
+            <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+              Configure order tag filtering for sales synchronization across all stores.
+            </p>
+            <div class="form-group">
+              <label class="form-label">
+                Sales Order Tag
+                <span style="color: var(--text-tertiary); font-weight: normal; font-size: 0.875rem;">(required for sales sync)</span>
+              </label>
+              <input
+                type="text"
+                name="sales_order_tag"
+                placeholder="e.g., warehouse-main"
+                class="form-input"
+              />
+              <small style="display: block; margin-top: 0.5rem; color: var(--text-secondary);">
+                Orders with this tag will be included in sales sync across all configured stores.
+                Make sure your orders are tagged at fulfillment with this tag.
+              </small>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">
+                Sales Sync Period (Days)
+              </label>
+              <input
+                type="number"
+                name="sales_sync_days"
+                placeholder="30"
+                min="1"
+                max="365"
+                class="form-input"
+              />
+              <small style="display: block; margin-top: 0.5rem; color: var(--text-secondary);">
+                Number of days to look back when syncing sales data (default: 30, min: 1, max: 365).
+              </small>
+            </div>
+          </div>
+
+          <!-- Data Management (Danger Zone) -->
+          <div class="card" style="margin-top: 1.5rem; border: 2px solid var(--accent-danger);">
+            <h2 class="card-title">
+              <i class="fas fa-exclamation-triangle" style="margin-right: 0.5rem; color: var(--accent-danger);"></i>
+              Data Management
+            </h2>
+            <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1.5rem;">
+              ⚠️ <strong>Danger Zone:</strong> These operations cannot be undone. Proceed with caution.
+            </p>
+
+            <!-- Delete All Products -->
+            <div style="padding: 1rem; background: rgba(239, 68, 68, 0.1); border-left: 4px solid var(--accent-danger); border-radius: 0.5rem; margin-bottom: 1.5rem;">
+              <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem;">
+                Delete All Products
+              </h3>
+              <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                Permanently remove all products from the database.
+              </p>
+              <button onclick="clearAllProducts()" class="btn" style="background: var(--accent-danger); color: white;">
+                <i class="fas fa-trash"></i> Delete All Products
+              </button>
+            </div>
+
+            <!-- Clear Column Data -->
+            <div style="border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
+              <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem;">
+                Clear Column Data
+              </h3>
+              <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                Clear specific data columns for all products. Values will be set to empty.
+              </p>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem;">
+                <button onclick="clearColumnData('threshold_quantity', 'Threshold Quantities')" class="btn btn-secondary" style="width: 100%;">
+                  <i class="fas fa-eraser"></i> Threshold
+                </button>
+                <button onclick="clearColumnData('quantity_per_case', 'Case Quantities')" class="btn btn-secondary" style="width: 100%;">
+                  <i class="fas fa-eraser"></i> Case
+                </button>
+                <button onclick="clearColumnData('price', 'Price Data')" class="btn btn-secondary" style="width: 100%;">
+                  <i class="fas fa-eraser"></i> Price
+                </button>
+                <button onclick="clearColumnData('available_quantity', 'Stock Quantities')" class="btn btn-secondary" style="width: 100%;">
+                  <i class="fas fa-eraser"></i> Stock
+                </button>
+                <button onclick="clearColumnData('quantity_sold_last_month', 'Order Quantities')" class="btn btn-secondary" style="width: 100%;">
+                  <i class="fas fa-eraser"></i> Order
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Save Settings Button -->
+          <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 2px solid var(--border-color); display: flex; justify-content: flex-end; position: sticky; bottom: 0; background: var(--bg-primary); z-index: 10;">
+            <button
+              onclick="saveSettings()"
+              class="btn btn-primary"
+              style="padding: 0.75rem 2rem; font-size: 1rem;"
+            >
+              <i class="fas fa-save"></i> Save All Settings
+            </button>
+          </div>
+        </div>
+      </main>
+    </div>
+      </div>
+    </div>
+
+    <!-- Sync Progress Modal -->
+    <div id="sync-progress-modal">
+      <div class="modal-content">
+        <div style="margin-bottom: 1.5rem;">
+          <h3 class="modal-header">Syncing Inventory</h3>
+          <p style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.5rem;">
+            Syncing products with Shopify...
+          </p>
+        </div>
+
+        <!-- Progress Bar -->
+        <div style="margin-bottom: 1.5rem;">
+          <div style="display: flex; justify-content: space-between; font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+            <span id="sync-progress-text">Starting...</span>
+            <span id="sync-progress-percentage">0%</span>
+          </div>
+          <div style="width: 100%; background: var(--bg-tertiary); border-radius: 9999px; height: 10px; overflow: hidden;">
+            <div
+              id="sync-progress-bar"
+              style="background: var(--accent-primary); height: 10px; border-radius: 9999px; transition: width 0.3s ease; width: 0%;"
+            ></div>
+          </div>
+        </div>
+
+        <!-- Current Product -->
+        <div style="margin-bottom: 1.5rem;">
+          <p style="font-size: 0.875rem; color: var(--text-primary);" id="sync-current-product">
+            Preparing sync...
+          </p>
+        </div>
+
+        <!-- Summary Stats -->
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-bottom: 1.5rem;">
+          <div style="text-align: center; padding: 0.75rem; background: rgba(16, 185, 129, 0.1); border-radius: 0.5rem; border: 1px solid rgba(16, 185, 129, 0.2);">
+            <div
+              style="font-size: 1.5rem; font-weight: 700; color: var(--accent-primary);"
+              id="sync-synced-count"
+            >
+              0
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-tertiary);">Synced</div>
+          </div>
+          <div style="text-align: center; padding: 0.75rem; background: rgba(245, 158, 11, 0.1); border-radius: 0.5rem; border: 1px solid rgba(245, 158, 11, 0.2);">
+            <div
+              style="font-size: 1.5rem; font-weight: 700; color: #f59e0b;"
+              id="sync-notfound-count"
+            >
+              0
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-tertiary);">Not Found</div>
+          </div>
+          <div style="text-align: center; padding: 0.75rem; background: rgba(239, 68, 68, 0.1); border-radius: 0.5rem; border: 1px solid rgba(239, 68, 68, 0.2);">
+            <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-danger);" id="sync-error-count">
+              0
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-tertiary);">Errors</div>
+          </div>
+        </div>
+
+        <!-- Not Found Products Section -->
+        <div id="sync-notfound-section" class="hidden" style="margin-bottom: 1.5rem; display: none;">
+          <div style="border-top: 1px solid var(--border-color); padding-top: 1rem;">
+            <button
+              onclick="toggleNotFoundList()"
+              style="display: flex; align-items: center; justify-content: space-between; width: 100%; text-align: left; font-size: 0.875rem; font-weight: 500; color: var(--text-primary); background: transparent; border: none; cursor: pointer; padding: 0.5rem; border-radius: 0.375rem;"
+              class="btn-ghost"
+            >
+              <span
+                >⚠ Products Not Found in Shopify (<span
+                  id="sync-notfound-section-count"
+                  >0</span
+                >)</span
+              >
+              <i id="sync-notfound-toggle-icon" class="fas fa-chevron-down"></i>
+            </button>
+            <div
+              id="sync-notfound-list"
+              class="hidden"
+              style="margin-top: 0.5rem; max-height: 12rem; overflow-y: auto; display: none;"
+            >
+              <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                <!-- Not found products will be inserted here -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Close Button (disabled during sync) -->
+        <div style="display: flex; justify-content: flex-end;">
+          <button
+            id="sync-close-button"
+            onclick="closeSyncModal()"
+            class="btn btn-secondary"
+            style="cursor: not-allowed; opacity: 0.5;"
+            disabled
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Product Modal -->
+    <div id="product-modal">
+      <div class="modal-content">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+          <h3 id="modal-title" class="modal-header">Add Product</h3>
+          <button
+            onclick="closeProductModal()"
+            class="btn-ghost"
+            style="padding: 0.5rem;"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <form id="product-form">
+          <input type="hidden" id="product-id" />
+          <div class="form-group">
+            <label class="form-label">Product Name *</label>
+            <input
+              type="text"
+              id="product-name"
+              required
+              class="form-input"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">UPC Barcode *</label>
+            <input
+              type="text"
+              id="product-barcode"
+              required
+              class="form-input"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Threshold Quantity</label>
+            <input
+              type="number"
+              id="product-threshold"
+              class="form-input"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Quantity per Case</label>
+            <input
+              type="number"
+              id="product-qty-case"
+              class="form-input"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Price</label>
+            <input
+              type="number"
+              step="0.01"
+              id="product-price"
+              class="form-input"
+            />
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 0.75rem; padding-top: 1rem;">
+            <button
+              type="button"
+              onclick="closeProductModal()"
+              class="btn btn-secondary"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              class="btn btn-primary"
+            >
+              Save
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Missing Products Modal -->
+    <div id="missing-products-modal">
+      <div class="modal-content" style="max-width: 800px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+          <h3 class="modal-header">Products in Shopify (Not in Local Database)</h3>
+          <button
+            onclick="closeMissingProductsModal()"
+            class="btn-ghost"
+            style="padding: 0.5rem;"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <div
+          id="missing-products-loading"
+          style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem 0;"
+        >
+          <i class="spinner" style="margin-bottom: 1rem;"></i>
+          <p id="missing-products-status" style="color: var(--text-secondary);">Searching for missing products...</p>
+        </div>
+
+        <div
+          id="missing-products-content"
+          class="hidden"
+          style="display: none; flex-direction: column; flex: 1; overflow: hidden;"
+        >
+          <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1rem;">
+            Found
+            <span id="missing-products-count" style="font-weight: 700; color: var(--text-primary);">0</span>
+            product(s) in Shopify that are not in your local database (with
+            available quantity > 0).
+          </p>
+
+          <div style="margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+            <label style="display: flex; align-items: center; cursor: pointer;">
+              <input
+                type="checkbox"
+                id="select-all-missing"
+                onchange="toggleSelectAllMissing()"
+                class="checkbox"
+                style="margin-right: 0.5rem;"
+              />
+              <span style="font-size: 0.875rem; font-weight: 500; color: var(--text-primary);">Select All</span>
+            </label>
+          </div>
+
+          <div
+            id="missing-products-list"
+            style="flex: 1; overflow-y: auto; margin-bottom: 1rem; max-height: 400px;"
+          >
+            <!-- Missing products will be inserted here -->
+          </div>
+
+          <div
+            style="display: flex; justify-content: space-between; align-items: center; padding-top: 1rem; border-top: 1px solid var(--border-color);"
+          >
+            <p style="font-size: 0.875rem; color: var(--text-secondary);">
+              <span id="selected-count" style="font-weight: 600; color: var(--text-primary);">0</span> product(s) selected
+            </p>
+            <div style="display: flex; gap: 0.5rem;">
+              <button
+                onclick="closeMissingProductsModal()"
+                class="btn btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                onclick="addSelectedProducts()"
+                class="btn btn-primary"
+              >
+                <i class="fas fa-plus" style="margin-right: 0.5rem;"></i>Add Selected
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="missing-products-error" class="hidden" style="display: none; text-align: center; padding: 2rem 0;">
+          <i class="fas fa-exclamation-triangle" style="font-size: 3rem; color: var(--accent-danger); margin-bottom: 1rem;"></i>
+          <p style="color: var(--text-secondary);"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quotation Modal -->
+    <div
+      id="quotation-modal"
+      class="modal-overlay hidden"
+      style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7); align-items: center; justify-content: center; z-index: 1000;"
+    >
+      <div class="modal-content" style="width: 90%; max-width: 800px; max-height: 90vh; overflow-y: auto; background: var(--bg-secondary); border-radius: 0.5rem; padding: 1.5rem; border: 1px solid var(--border-color);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; border-bottom: 2px solid var(--accent-primary); padding-bottom: 1rem;">
+          <h2 style="margin: 0; font-size: 1.5rem; color: var(--text-primary);">
+            <i class="fas fa-file-invoice" style="margin-right: 0.5rem; color: var(--accent-primary);"></i>Create Quotation
+          </h2>
+          <button
+            onclick="closeQuotationModal()"
+            style="background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1.5rem; padding: 0; width: 2rem; height: 2rem; display: flex; align-items: center; justify-content: center;"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <!-- Customer Selection -->
+        <div style="margin-bottom: 1.5rem;">
+          <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: var(--text-primary);">
+            Customer <span style="color: var(--accent-danger);">*</span>
+          </label>
+          <input
+            type="text"
+            id="quotation-customer-search"
+            placeholder="Search by Account Number..."
+            autocomplete="off"
+            style="width: 100%; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 0.375rem; color: var(--text-primary); font-size: 1rem;"
+          />
+          <div
+            id="quotation-customer-results"
+            style="position: relative; max-height: 200px; overflow-y: auto; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 0.375rem; margin-top: 0.25rem; display: none;"
+          ></div>
+          <div id="quotation-selected-customer" style="display: none; margin-top: 0.5rem; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--accent-primary); border-radius: 0.375rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <p style="margin: 0; font-weight: 600; color: var(--text-primary);" id="quotation-customer-name"></p>
+                <p style="margin: 0.25rem 0 0 0; font-size: 0.875rem; color: var(--text-secondary);" id="quotation-customer-account"></p>
+              </div>
+              <button
+                onclick="clearSelectedCustomer()"
+                style="background: transparent; border: none; color: var(--accent-danger); cursor: pointer; padding: 0.25rem 0.5rem;"
+              >
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Optional Fields -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
+          <div>
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: var(--text-primary);">Quotation Title</label>
+            <input
+              type="text"
+              id="quotation-title"
+              placeholder="Optional"
+              style="width: 100%; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 0.375rem; color: var(--text-primary); font-size: 1rem;"
+            />
+          </div>
+          <div>
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: var(--text-primary);">PO Number</label>
+            <input
+              type="text"
+              id="quotation-po-number"
+              placeholder="Optional"
+              style="width: 100%; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 0.375rem; color: var(--text-primary); font-size: 1rem;"
+            />
+          </div>
+        </div>
+
+        <div style="margin-bottom: 1.5rem;">
+          <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: var(--text-primary);">Notes</label>
+          <textarea
+            id="quotation-notes"
+            placeholder="Optional notes..."
+            rows="3"
+            style="width: 100%; padding: 0.75rem; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 0.375rem; color: var(--text-primary); font-size: 1rem; resize: vertical;"
+          ></textarea>
+        </div>
+
+        <!-- Selected Products Preview -->
+        <div style="margin-bottom: 1.5rem;">
+          <h3 style="margin: 0 0 0.75rem 0; font-size: 1.125rem; color: var(--text-primary);">Selected Products</h3>
+          <div style="overflow-x: auto; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 0.375rem;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="background: var(--bg-primary); border-bottom: 1px solid var(--border-color);">
+                  <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: var(--text-primary);">Product</th>
+                  <th style="padding: 0.75rem; text-align: left; font-weight: 600; color: var(--text-primary);">UPC</th>
+                  <th style="padding: 0.75rem; text-align: right; font-weight: 600; color: var(--text-primary);">Qty</th>
+                  <th style="padding: 0.75rem; text-align: right; font-weight: 600; color: var(--text-primary);">Price</th>
+                  <th style="padding: 0.75rem; text-align: right; font-weight: 600; color: var(--text-primary);">Total</th>
+                </tr>
+              </thead>
+              <tbody id="quotation-products-preview">
+                <!-- Products will be inserted here -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Quotation Total -->
+        <div style="display: flex; justify-content: flex-end; padding: 1rem; background: var(--bg-tertiary); border: 1px solid var(--accent-primary); border-radius: 0.375rem; margin-bottom: 1.5rem;">
+          <div style="text-align: right;">
+            <p style="margin: 0 0 0.25rem 0; font-size: 0.875rem; color: var(--text-secondary);">Quotation Total</p>
+            <p style="margin: 0; font-size: 1.5rem; font-weight: 700; color: var(--accent-primary);" id="quotation-total-display">$0.00</p>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem;">
+          <button
+            onclick="closeQuotationModal()"
+            class="btn btn-secondary"
+          >
+            Cancel
+          </button>
+          <button
+            onclick="submitQuotation()"
+            class="btn btn-primary"
+            id="quotation-submit-btn"
+          >
+            <i class="fas fa-check" style="margin-right: 0.5rem;"></i>Create Quotation
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/settings.js"></script>
+    <script src="/static/js/products.js"></script>
+    <script src="/static/js/import.js"></script>
+  </body>
+</html>

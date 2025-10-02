@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # Backend API (Flask)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: inventory-backend
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/inventory.db
+      - PYTHONUNBUFFERED=1
+    networks:
+      - inventory-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/products"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend (Nginx serving static files)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: inventory-frontend
+    networks:
+      - inventory-network
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  # Reverse Proxy (Nginx)
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: inventory-nginx
+    ports:
+      - "5001:80"
+    networks:
+      - inventory-network
+    restart: unless-stopped
+    depends_on:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  inventory-network:
+    driver: bridge
+
+volumes:
+  data:
