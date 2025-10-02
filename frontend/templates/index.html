@@ -28,39 +28,15 @@
             </div>
           </div>
           <div class="header-actions">
-            <button onclick="showView('settings')" class="btn btn-ghost">Settings</button>
-            <button onclick="showView('import')" class="btn btn-secondary">Import Excel</button>
+            <button onclick="showView('products')" id="nav-products-btn" class="btn btn-ghost">Products</button>
+            <button onclick="showView('settings')" id="nav-settings-btn" class="btn btn-ghost">Settings</button>
+            <button onclick="showView('import')" id="nav-import-btn" class="btn btn-secondary">Import Excel</button>
             <button onclick="openProductModal()" class="btn btn-primary">
               <i class="fas fa-plus"></i>
               <span>Add Product</span>
             </button>
           </div>
         </header>
-
-        <!-- Navigation -->
-        <nav style="display: flex; gap: 0.5rem; margin-bottom: 2rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0;">
-          <button
-            onclick="showView('products')"
-            class="nav-btn"
-            data-view="products"
-          >
-            <i class="fas fa-list"></i> Products
-          </button>
-          <button
-            onclick="showView('import')"
-            class="nav-btn"
-            data-view="import"
-          >
-            <i class="fas fa-file-import"></i> Import
-          </button>
-          <button
-            onclick="showView('settings')"
-            class="nav-btn"
-            data-view="settings"
-          >
-            <i class="fas fa-cog"></i> Settings
-          </button>
-        </nav>
 
         <!-- Main Content -->
         <main>
@@ -133,6 +109,15 @@
                 style="display: none;"
               >
                 <i class="fas fa-file-invoice"></i> Create Quotation
+              </button>
+              <button
+                id="export-selected-btn"
+                onclick="exportSelectedProducts()"
+                class="btn btn-secondary"
+                style="display: none;"
+                title="Export to Excel"
+              >
+                <i class="fas fa-file-download"></i>
               </button>
             </div>
           </div>

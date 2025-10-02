@@ -170,6 +170,74 @@ def import_products():
         return jsonify({'error': f'Error processing file: {str(e)}'}), 500
 
 
+@app.route('/api/products/export', methods=['POST'])
+def export_products():
+    """Export selected products to Excel file."""
+    try:
+        data = request.json
+        product_ids = data.get('product_ids', [])
+
+        if not product_ids:
+            return jsonify({'error': 'No products selected'}), 400
+
+        import pandas as pd
+        import io
+        from datetime import datetime
+
+        # Fetch products from database
+        products = []
+        for product_id in product_ids:
+            product = database.get_product(product_id)
+            if product:
+                products.append(product)
+
+        if not products:
+            return jsonify({'error': 'No products found'}), 404
+
+        # Create DataFrame with column names matching import format
+        df = pd.DataFrame(products)
+
+        # Select and order columns for export
+        export_columns = [
+            'product_name',
+            'upc_barcode',
+            'threshold_quantity',
+            'quantity_per_case',
+            'price',
+            'available_quantity',
+            'quantity_sold_last_month'
+        ]
+
+        # Only include columns that exist in the data
+        df = df[[col for col in export_columns if col in df.columns]]
+
+        # Convert upc_barcode to string to preserve leading zeros
+        df['upc_barcode'] = df['upc_barcode'].astype(str)
+
+        # Create Excel file in memory
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Products')
+
+        output.seek(0)
+
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'products_export_{timestamp}.xlsx'
+
+        # Return file as download
+        from flask import send_file
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        return jsonify({'error': f'Error exporting products: {str(e)}'}), 500
+
+
 # Shopify endpoints
 @app.route('/api/shopify/test', methods=['POST'])
 def test_shopify_connection():

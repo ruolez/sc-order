@@ -22,14 +22,20 @@ function showView(viewName) {
         viewElement.classList.remove('hidden');
     }
 
-    // Update active nav button
-    document.querySelectorAll('.nav-btn').forEach(btn => {
-        btn.classList.remove('active');
+    // Update active state for top bar navigation buttons
+    const navButtons = ['products', 'settings', 'import'];
+    navButtons.forEach(view => {
+        const btn = document.getElementById(`nav-${view}-btn`);
+        if (btn) {
+            if (view === viewName) {
+                btn.classList.remove('btn-ghost');
+                btn.classList.add('btn-primary');
+            } else {
+                btn.classList.remove('btn-primary');
+                btn.classList.add('btn-ghost');
+            }
+        }
     });
-    const activeBtn = document.querySelector(`[data-view="${viewName}"]`);
-    if (activeBtn) {
-        activeBtn.classList.add('active');
-    }
 
     // Load data for specific views
     if (viewName === 'products') {

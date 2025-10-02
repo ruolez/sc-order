@@ -919,6 +919,9 @@ function updateOrderTotal() {
 
   // Update Create Quotation button visibility
   updateCreateQuotationButton();
+
+  // Update Export button visibility
+  updateExportButton();
 }
 
 // Restore checkbox selections by product IDs
@@ -1628,5 +1631,82 @@ async function submitQuotation() {
     submitBtn.disabled = false;
     submitBtn.innerHTML =
       '<i class="fas fa-check" style="margin-right: 0.5rem;"></i>Create Quotation';
+  }
+}
+
+// Update Export button visibility based on checkbox selections
+function updateExportButton() {
+  const checkedBoxes = document.querySelectorAll(".product-checkbox:checked");
+  const btn = document.getElementById("export-selected-btn");
+
+  if (checkedBoxes.length > 0) {
+    btn.style.display = "inline-flex";
+  } else {
+    btn.style.display = "none";
+  }
+}
+
+// Export selected products to Excel
+async function exportSelectedProducts() {
+  const checkedBoxes = document.querySelectorAll(".product-checkbox:checked");
+
+  if (checkedBoxes.length === 0) {
+    showToast("Please select at least one product", "info");
+    return;
+  }
+
+  // Collect product IDs
+  const productIds = [];
+  checkedBoxes.forEach((checkbox) => {
+    productIds.push(parseInt(checkbox.dataset.productId));
+  });
+
+  try {
+    showToast("Preparing export...", "info");
+
+    const response = await fetch("/api/products/export", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ product_ids: productIds }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || "Export failed");
+    }
+
+    // Get the blob from response
+    const blob = await response.blob();
+
+    // Extract filename from Content-Disposition header or use default
+    const contentDisposition = response.headers.get("Content-Disposition");
+    let filename = "products_export.xlsx";
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+      if (filenameMatch) {
+        filename = filenameMatch[1];
+      }
+    }
+
+    // Create download link
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+
+    // Cleanup
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+
+    showToast(
+      `Exported ${productIds.length} product(s) to ${filename}`,
+      "success",
+    );
+  } catch (error) {
+    showToast("Failed to export products: " + error.message, "error");
   }
 }
