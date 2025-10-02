@@ -70,6 +70,98 @@ else
     exit 1
 fi
 
+# Check for existing installation
+print_step "Checking for existing installation..."
+EXISTING_INSTALL=false
+
+# Check for running containers
+if command -v docker &> /dev/null; then
+    if sg docker -c "docker ps -a --format '{{.Names}}'" 2>/dev/null | grep -q "sc-order"; then
+        EXISTING_INSTALL=true
+        print_warning "Found existing SC-Order containers"
+    fi
+fi
+
+# Check for systemd service
+if [ -f "/etc/systemd/system/sc-order.service" ]; then
+    EXISTING_INSTALL=true
+    print_warning "Found existing SC-Order systemd service"
+fi
+
+# Check for data directory
+if [ -d "./data" ] && [ -f "./data/inventory.db" ]; then
+    EXISTING_INSTALL=true
+    print_warning "Found existing data directory with database"
+fi
+
+if [ "$EXISTING_INSTALL" = true ]; then
+    echo -e "\n${YELLOW}╔════════════════════════════════════════════════╗${NC}"
+    echo -e "${YELLOW}║   Existing Installation Detected              ║${NC}"
+    echo -e "${YELLOW}╚════════════════════════════════════════════════╝${NC}\n"
+
+    read -p "Do you want to remove the existing installation? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        print_step "Removing existing installation..."
+
+        # Stop and remove containers
+        if command -v docker &> /dev/null; then
+            if sg docker -c "docker compose ps -q" &> /dev/null; then
+                print_step "Stopping containers..."
+                sg docker -c "docker compose down" || true
+                print_success "Containers stopped"
+            fi
+
+            # Remove SC-Order images
+            IMAGES=$(sg docker -c "docker images --format '{{.Repository}}:{{.Tag}}'" | grep "sc-order" || true)
+            if [ ! -z "$IMAGES" ]; then
+                print_step "Removing Docker images..."
+                echo "$IMAGES" | while read -r image; do
+                    sg docker -c "docker rmi $image" || true
+                done
+                print_success "Docker images removed"
+            fi
+        fi
+
+        # Remove systemd service
+        if [ -f "/etc/systemd/system/sc-order.service" ]; then
+            print_step "Removing systemd service..."
+            sudo systemctl stop sc-order.service 2>/dev/null || true
+            sudo systemctl disable sc-order.service 2>/dev/null || true
+            sudo rm -f /etc/systemd/system/sc-order.service
+            sudo systemctl daemon-reload
+            print_success "Systemd service removed"
+        fi
+
+        # Ask about data directory
+        if [ -d "./data" ]; then
+            echo -e "\n${YELLOW}Data Directory Found${NC}"
+            read -p "Do you want to delete the existing database? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                print_step "Backing up database..."
+                BACKUP_FILE="./data/inventory.db.backup.$(date +%Y%m%d_%H%M%S)"
+                cp ./data/inventory.db "$BACKUP_FILE" 2>/dev/null || true
+                if [ -f "$BACKUP_FILE" ]; then
+                    print_success "Database backed up to: $BACKUP_FILE"
+                fi
+
+                rm -rf ./data
+                print_success "Data directory removed"
+            else
+                print_warning "Keeping existing database"
+            fi
+        fi
+
+        print_success "Existing installation removed"
+        echo ""
+    else
+        print_error "Installation cancelled"
+        echo "Please manually remove the existing installation or choose a different directory"
+        exit 1
+    fi
+fi
+
 # Ask for server IP
 print_step "Network Configuration"
 echo "Enter the local network IP address for this server"
@@ -142,7 +234,7 @@ else
 fi
 
 # Verify Docker Compose
-if ! docker compose version &> /dev/null; then
+if ! sg docker -c "docker compose version" &> /dev/null; then
     print_error "Docker Compose plugin not found"
     exit 1
 else
@@ -163,12 +255,12 @@ fi
 
 # Build Docker images
 print_step "Building Docker images (this may take a few minutes)..."
-docker compose build --no-cache
+sg docker -c "docker compose build --no-cache"
 print_success "Docker images built successfully"
 
 # Start containers
 print_step "Starting containers..."
-docker compose up -d
+sg docker -c "docker compose up -d"
 print_success "Containers started"
 
 # Wait for services to be healthy
@@ -180,7 +272,7 @@ sleep 10
 MAX_RETRIES=12
 RETRY_COUNT=0
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if docker compose ps | grep -q "healthy"; then
+    if sg docker -c "docker compose ps" | grep -q "healthy"; then
         print_success "All services are healthy"
         break
     fi
@@ -197,7 +289,7 @@ done
 
 # Display container status
 print_step "Container Status"
-docker compose ps
+sg docker -c "docker compose ps"
 
 # Test application endpoint
 print_step "Testing application..."
