@@ -128,6 +128,7 @@ curl http://localhost:5001/api/products
   - Missing products: `/api/products/missing` (GET - returns SSE stream for finding products in Shopify not in local DB)
   - Clear column: `/api/products/clear-column` (POST - sets specific column to NULL for all products, whitelist protected)
   - Quotations: `/api/quotations/customers/search?q=<query>` (GET - customer autocomplete), `/api/quotations/customers/<id>` (GET - customer details), `/api/quotations/create` (POST - create quotation with line items)
+  - Reports: `/api/reports/sc-sales?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD` (GET - SC sales report), `/api/reports/sc-sales/export` (POST - Excel export with formatted summary)
 
 - `database.py`: SQLite operations with automatic schema migrations
   - `init_database()`: Creates tables and runs migrations on startup
@@ -171,6 +172,13 @@ curl http://localhost:5001/api/products
   - `updateLowStockCount()`: Updates low stock counter based on available_quantity <= threshold_quantity
   - `restoreCheckboxSelections()`: Helper to restore selected products after reload
   - `updateSortIcons()`: Helper to update sort column visual indicators
+- `reports.js`: SC Sales report functionality
+  - `formatCurrency()`: Helper function for currency formatting with comma thousands separators using `toLocaleString('en-US')`
+  - `loadSCScalesReport()`: Fetches sales report data for selected date range
+  - `renderReportTable()`: Renders product sales table with formatted currency
+  - `sortReportTable(column)`: Client-side table sorting with ascending/descending toggle
+  - `exportReport()`: Downloads Excel file with formatted sales data and summary
+  - `setLast7Days()`, `setLast30Days()`, `setThisMonth()`: Date range shortcuts
 - `settings.js`: Settings form management, API connections, data management operations
   - `clearColumnData()`: Clears specific column data for all products (threshold, case, price, stock, order)
 - `import.js`: Excel file upload and import
@@ -195,7 +203,7 @@ curl http://localhost:5001/api/products
 - Avoid Tailwind utility classes for dynamic content - use CSS variables and inline styles instead
 
 **Settings Page Organization**:
-- **Shopify Integration**: Single unified card with main store (bordered) and collapsible additional stores section
+- **Shopify Integration**: Single unified card with main store (bordered) and collapsible additional stores section (stores 2-6)
 - **MS SQL Integration**: Separate card with server/port/database/credentials in 2-column grid layout
 - **Sales Sync Configuration**: Separate card for configuring:
   - Sales Order Tag: Tag used in tag-based filtering
@@ -212,13 +220,14 @@ curl http://localhost:5001/api/products
 - shopify_store_3_url, shopify_store_3_token, shopify_store_3_location_id
 - shopify_store_4_url, shopify_store_4_token, shopify_store_4_location_id
 - shopify_store_5_url, shopify_store_5_token, shopify_store_5_location_id
+- shopify_store_6_url, shopify_store_6_token, shopify_store_6_location_id
 - excluded_skus (TEXT - comma or newline separated SKU prefixes)
 - sales_order_tag (TEXT - required for sales sync, filters orders by tag)
 - sales_sync_days (INTEGER - days to look back for sales sync, default 30)
 - mssql_server, mssql_database, mssql_username, mssql_password, mssql_port
 ```
 
-**Note**: The application supports up to 5 Shopify stores for sales aggregation.
+**Note**: The application supports up to 6 Shopify stores for sales aggregation.
 
 **Products Table**:
 ```sql
@@ -283,6 +292,93 @@ The application includes functionality to create quotations in the MS SQL databa
 - `previewQuotationProducts(products)`: Displays selected products in modal
 - `submitQuotation()`: Validates and submits quotation data
 - State management: Checkbox selections cleared after successful quotation creation
+
+### SC Sales Reports Feature
+
+The application includes a comprehensive sales reporting system that aggregates sales data across all configured Shopify stores:
+
+**Workflow**:
+1. User navigates to Reports section and selects date range (or uses quick presets: Last 7 Days, Last 30 Days, This Month)
+2. "Load Report" fetches sales data from all configured Shopify stores in parallel
+3. Report displays products with sales during the period, sorted by quantity sold (descending)
+4. User can sort by any column (Product Name, UPC, Quantity Sold, Price, Estimated Total, etc.)
+5. "Export to Excel" generates formatted Excel file with summary and detailed data
+
+**Key Features**:
+- **Multi-Store Aggregation**: Combines sales data from up to 6 Shopify stores
+- **Tag-Based Filtering**: Uses `sales_order_tag` setting to filter relevant orders
+- **Currency Formatting**: All dollar amounts display with comma thousands separators (e.g., $12,345.67)
+- **Total Sales Value**: Automatically calculates sum of all estimated totals (Quantity × Price)
+- **Real-Time Progress**: Shows store processing status and handles failures gracefully
+- **Excel Export**: Generates formatted .xlsx file with summary sheet and detailed product data
+
+**Key API Endpoints** (`backend/app.py`):
+- `GET /api/reports/sc-sales?from_date=YYYY-MM-DD&to_date=YYYY-MM-DD`: Generate sales report
+  - Fetches orders from all configured stores in parallel using ThreadPoolExecutor
+  - Aggregates sales by SKU across all stores
+  - Calculates estimated totals (quantity × price)
+  - Returns products with sales only (excludes zero-sale items)
+  - Includes summary: total_products, products_with_sales, total_items_sold, total_sales_value
+  - Includes stores_info: stores_processed, stores_failed (with error details), tag_used
+- `POST /api/reports/sc-sales/export`: Export report to Excel
+  - Generates .xlsx file using pandas and openpyxl
+  - Summary sheet with formatted metrics including Total Sales Value
+  - Detailed sheet with all product sales data
+  - Currency values formatted with comma separators (e.g., "$12,345.67")
+
+**Currency Formatting Pattern** (`frontend/static/js/reports.js`):
+```javascript
+function formatCurrency(amount) {
+  if (amount === null || amount === undefined || isNaN(amount)) {
+    return '0.00';
+  }
+
+  const num = parseFloat(amount);
+  return num.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+```
+
+**Report Summary Display**:
+- Total Products: Count of products with sales in the period
+- Products with Sales: Same as total products (only products with sales are shown)
+- Total Items Sold: Sum of all quantities sold
+- **Total Sales Value**: Sum of all estimated totals (Quantity × Price) with formatted currency
+- Stores Processed: Number of stores successfully queried
+- Date Range: Selected from/to dates with number of days
+- Tag Used: Tag used for order filtering
+
+**Failed Stores Handling**:
+- If any store fails to respond, the report continues with available data
+- Failed stores are displayed in a warning section with error details
+- Each failed store shows: store URL and specific error message
+- User can still generate report from successfully processed stores
+
+**Frontend Implementation** (`frontend/static/js/reports.js`):
+- `formatCurrency(amount)`: Formats numbers as currency with comma separators
+- `loadSCScalesReport()`: Fetches report data and updates UI with formatted values
+- `renderReportTable(products)`: Renders table rows with formatted currency columns
+- `sortReportTable(column)`: Client-side sorting with direction toggle
+- `exportReport()`: Downloads Excel file via POST request with blob handling
+- `setLast7Days()`, `setLast30Days()`, `setThisMonth()`: Date range shortcuts
+
+**Excel Export Format**:
+- **Summary Sheet**: Metrics table with formatted values
+  - Report Period, From Date, To Date, Number of Days
+  - Total Products, Products with Sales, Total Items Sold
+  - **Total Sales Value** (formatted as "$XXX,XXX.XX")
+  - Stores Processed, Tag Used
+- **Detailed Sheet**: Product-level data with columns:
+  - Product Name, UPC Barcode, Quantity Sold, Price, **Estimated Total**, Quantity per Case, Available Quantity
+  - All currency columns formatted with 2 decimal places
+
+**Important Notes**:
+- Only products with sales > 0 are included in the report
+- Products are sorted by quantity sold (descending) by default
+- Currency formatting is consistent across UI and Excel export
+- Report data matches exactly what's shown in the UI table
 
 ### Excluded SKUs Feature
 - Supports prefix matching (not exact matching)
@@ -458,3 +554,44 @@ The "Find Missing Products" operation uses SSE to stream results in real-time:
 4. Frontend displays products in real-time with checkboxes for bulk selection
 5. User can select multiple products and click "Add Selected" to import them
 6. Respects excluded SKUs settings (prefix matching)
+
+---
+
+## Deployment History
+
+### Store 6 Implementation (October 2025)
+**Status**: ✅ Deployed and Verified
+
+**Changes Made**:
+- Extended multi-store support from 5 to 6 Shopify stores
+- Database migration: Added `shopify_store_6_url`, `shopify_store_6_token`, `shopify_store_6_location_id` columns
+- Backend: Updated store aggregation loop from `range(2, 6)` to `range(2, 7)` in `app.py:1084`
+- Frontend HTML: Added Store 6 collapsible section in settings UI
+- Frontend JavaScript: Updated settings.js loops from `i <= 5` to `i <= 6`
+- Documentation: Updated all references from "5 stores" to "6 stores"
+
+**Files Modified**:
+- `backend/database.py` (3 edits): Migration array, UPDATE query, SQL parameters
+- `backend/app.py` (1 edit): Store iteration loop
+- `frontend/static/js/settings.js` (2 edits): Load/save loops
+- `frontend/templates/index.html` (2 edits): UI section, description text
+- `CLAUDE.md` (3 edits): Documentation updates
+
+**Verification Results**:
+- ✅ Database columns created successfully via automatic migration
+- ✅ Settings API returns Store 6 fields with null values (expected)
+- ✅ Frontend displays Store 6 in Additional Stores section
+- ✅ JavaScript correctly iterates through 6 stores
+- ✅ All containers healthy and running
+- ✅ Multi-store operations (Sales Sync, SC Sales Report) now support 6 stores
+
+**Deployment Command**:
+```bash
+docker-compose build --no-cache backend frontend
+docker-compose up -d
+```
+
+**Post-Deployment**:
+- Zero downtime migration - database schema updated automatically on container restart
+- No data loss - existing store configurations (1-5) preserved
+- Store 6 ready for configuration in Settings → Shopify Integration → Additional Stores

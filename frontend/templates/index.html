@@ -29,6 +29,7 @@
           </div>
           <div class="header-actions">
             <button onclick="showView('products')" id="nav-products-btn" class="btn btn-ghost">Products</button>
+            <button onclick="showView('reports')" id="nav-reports-btn" class="btn btn-ghost">Reports</button>
             <button onclick="showView('settings')" id="nav-settings-btn" class="btn btn-ghost">Settings</button>
             <button onclick="showView('import')" id="nav-import-btn" class="btn btn-secondary">Import Excel</button>
             <button onclick="openProductModal()" class="btn btn-primary">
@@ -182,6 +183,162 @@
           </div>
         </div>
 
+        <!-- Reports View -->
+        <div id="reports-view" class="view-container hidden">
+          <div class="card">
+            <h2 class="card-title">
+              <i class="fas fa-chart-bar" style="margin-right: 0.5rem;"></i>
+              SC Sales Report
+            </h2>
+            <p class="card-description">
+              View aggregated sales data across all configured Shopify stores for a custom date range.
+            </p>
+
+            <!-- Date Range Selection -->
+            <div style="margin-bottom: 1.5rem;">
+              <label class="form-label">Date Range</label>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.75rem;">
+                <div class="form-group" style="margin-bottom: 0;">
+                  <input type="date" id="report-from-date" class="form-input" />
+                  <small style="display: block; margin-top: 0.25rem; color: var(--text-tertiary);">From Date</small>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                  <input type="date" id="report-to-date" class="form-input" />
+                  <small style="display: block; margin-top: 0.25rem; color: var(--text-tertiary);">To Date</small>
+                </div>
+              </div>
+
+              <!-- Quick Date Selection -->
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <button onclick="setLast7Days()" class="btn btn-ghost" style="font-size: 0.875rem; padding: 0.5rem 1rem;">Last 7 Days</button>
+                <button onclick="setLast30Days()" class="btn btn-ghost" style="font-size: 0.875rem; padding: 0.5rem 1rem;">Last 30 Days</button>
+                <button onclick="setThisMonth()" class="btn btn-ghost" style="font-size: 0.875rem; padding: 0.5rem 1rem;">This Month</button>
+              </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display: flex; gap: 0.75rem; margin-bottom: 1.5rem;">
+              <button id="load-report-btn" onclick="loadSCScalesReport()" class="btn btn-primary">
+                <i class="fas fa-chart-bar"></i> Load Report
+              </button>
+              <button id="export-report-btn" onclick="exportReport()" class="btn btn-secondary" style="display: none;">
+                <i class="fas fa-file-download"></i> Export to Excel
+              </button>
+            </div>
+
+            <!-- Report Results -->
+            <div id="report-results" style="display: none;">
+              <!-- Loading State -->
+              <div id="report-loading" style="display: none; flex-direction: column; align-items: center; justify-content: center; padding: 3rem 0;">
+                <i class="spinner" style="margin-bottom: 1rem;"></i>
+                <p style="color: var(--text-secondary);">Loading report...</p>
+              </div>
+
+              <!-- Report Content -->
+              <div id="report-content" style="display: none;">
+                <!-- Summary Stats -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+                  <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 0.5rem; border-left: 4px solid var(--accent-primary);">
+                    <div style="font-size: 0.875rem; color: var(--text-tertiary); margin-bottom: 0.25rem;">Total Products</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--text-primary);" id="report-total-products">0</div>
+                  </div>
+                  <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 0.5rem; border-left: 4px solid var(--accent-primary);">
+                    <div style="font-size: 0.875rem; color: var(--text-tertiary); margin-bottom: 0.25rem;">Products with Sales</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-primary);" id="report-products-with-sales">0</div>
+                  </div>
+                  <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 0.5rem; border-left: 4px solid var(--accent-primary);">
+                    <div style="font-size: 0.875rem; color: var(--text-tertiary); margin-bottom: 0.25rem;">Total Items Sold</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-primary);" id="report-total-items-sold">0</div>
+                  </div>
+                  <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 0.5rem; border-left: 4px solid var(--accent-primary);">
+                    <div style="font-size: 0.875rem; color: var(--text-tertiary); margin-bottom: 0.25rem;">Total Sales Value</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-primary);" id="report-total-sales-value">$0.00</div>
+                  </div>
+                  <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 0.5rem; border-left: 4px solid var(--accent-secondary);">
+                    <div style="font-size: 0.875rem; color: var(--text-tertiary); margin-bottom: 0.25rem;">Stores Processed</div>
+                    <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent-secondary);" id="report-stores-processed">0</div>
+                  </div>
+                </div>
+
+                <!-- Report Metadata -->
+                <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 0.5rem; margin-bottom: 1.5rem;">
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; font-size: 0.875rem;">
+                    <div>
+                      <span style="color: var(--text-tertiary);">Date Range:</span>
+                      <span style="color: var(--text-primary); font-weight: 500; margin-left: 0.5rem;" id="report-date-range">N/A</span>
+                    </div>
+                    <div>
+                      <span style="color: var(--text-tertiary);">Order Tag:</span>
+                      <span style="color: var(--text-primary); font-weight: 500; margin-left: 0.5rem;" id="report-tag-used">N/A</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Failed Stores Section -->
+                <div id="failed-stores-section" style="display: none; margin-bottom: 1.5rem;">
+                  <div style="padding: 1rem; background: rgba(239, 68, 68, 0.1); border-left: 4px solid var(--accent-danger); border-radius: 0.5rem;">
+                    <h3 style="margin: 0 0 0.75rem 0; font-size: 1rem; font-weight: 600; color: var(--accent-danger);">
+                      <i class="fas fa-exclamation-triangle" style="margin-right: 0.5rem;"></i>Failed Stores
+                    </h3>
+                    <div id="failed-stores-list" style="display: flex; flex-direction: column; gap: 0.5rem;">
+                      <!-- Failed stores will be inserted here -->
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Report Table -->
+                <div class="table-card">
+                  <div class="table-header">
+                    <h2 class="table-title">Sales Details</h2>
+                    <span class="table-meta">Sorted by quantity sold (highest first)</span>
+                  </div>
+
+                  <div class="table-container">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style="text-align: center;">#</th>
+                          <th onclick="sortReportTable('product_name')" style="cursor: pointer;">
+                            Product Name
+                            <i id="report-sort-icon-product_name" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                          </th>
+                          <th onclick="sortReportTable('upc_barcode')" style="cursor: pointer;">
+                            UPC Barcode
+                            <i id="report-sort-icon-upc_barcode" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                          </th>
+                          <th onclick="sortReportTable('quantity_sold')" style="cursor: pointer; text-align: center;">
+                            Qty Sold
+                            <i id="report-sort-icon-quantity_sold" class="fas fa-sort-down" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                          </th>
+                          <th onclick="sortReportTable('quantity_per_case')" style="cursor: pointer; text-align: center;">
+                            Case Qty
+                            <i id="report-sort-icon-quantity_per_case" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                          </th>
+                          <th onclick="sortReportTable('price')" style="cursor: pointer; text-align: right;">
+                            Price
+                            <i id="report-sort-icon-price" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                          </th>
+                          <th onclick="sortReportTable('estimated_total')" style="cursor: pointer; text-align: right;">
+                            Est. Total
+                            <i id="report-sort-icon-estimated_total" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                          </th>
+                          <th onclick="sortReportTable('available_quantity')" style="cursor: pointer; text-align: center;">
+                            Stock
+                            <i id="report-sort-icon-available_quantity" class="fas fa-sort" style="margin-left: 0.25rem; font-size: 0.75rem;"></i>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody id="report-table-body">
+                        <!-- Report data will be loaded here -->
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Import View -->
         <div id="import-view" class="view-container hidden">
           <div class="card">
@@ -319,7 +476,7 @@
               </summary>
               <div style="padding: 1rem; margin-top: 1rem;">
                 <p style="font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 1rem;">
-                  Add up to 4 additional Shopify stores to aggregate sales data across multiple locations.
+                  Add up to 5 additional Shopify stores to aggregate sales data across multiple locations.
                 </p>
 
                 <!-- Store 2 -->
@@ -440,7 +597,7 @@
                 </details>
 
                 <!-- Store 5 -->
-                <details class="store-collapsible" style="margin-bottom: 0;">
+                <details class="store-collapsible" style="margin-bottom: 1rem;">
                   <summary style="cursor: pointer; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 0.375rem; font-weight: 500;">
                     <i class="fas fa-chevron-right" style="margin-right: 0.5rem; transition: transform 0.2s;"></i>
                     Store 5
@@ -471,6 +628,45 @@
                           <option value="">-- Select a location --</option>
                         </select>
                         <button type="button" class="btn btn-secondary" onclick="loadShopifyLocations(5)" style="white-space: nowrap;">
+                          <i class="fas fa-sync-alt"></i> Load
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+
+                <!-- Store 6 -->
+                <details class="store-collapsible" style="margin-bottom: 0;">
+                  <summary style="cursor: pointer; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 0.375rem; font-weight: 500;">
+                    <i class="fas fa-chevron-right" style="margin-right: 0.5rem; transition: transform 0.2s;"></i>
+                    Store 6
+                  </summary>
+                  <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 0.375rem; margin-top: 0.5rem;">
+                    <div class="form-group">
+                      <label class="form-label">Store URL</label>
+                      <input
+                        type="text"
+                        name="shopify_store_6_url"
+                        placeholder="store-6.myshopify.com"
+                        class="form-input"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Admin API Access Token</label>
+                      <input
+                        type="password"
+                        name="shopify_store_6_token"
+                        placeholder="shpat_..."
+                        class="form-input"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="form-label">Location</label>
+                      <div style="display: flex; gap: 0.5rem;">
+                        <select name="shopify_store_6_location_id" class="form-input" style="flex: 1;">
+                          <option value="">-- Select a location --</option>
+                        </select>
+                        <button type="button" class="btn btn-secondary" onclick="loadShopifyLocations(6)" style="white-space: nowrap;">
                           <i class="fas fa-sync-alt"></i> Load
                         </button>
                       </div>
@@ -1057,6 +1253,7 @@
     <script src="/static/js/app.js"></script>
     <script src="/static/js/settings.js"></script>
     <script src="/static/js/products.js"></script>
+    <script src="/static/js/reports.js"></script>
     <script src="/static/js/import.js"></script>
   </body>
 </html>

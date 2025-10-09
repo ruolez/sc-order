@@ -48,8 +48,8 @@ function populateSettingsForm(settings) {
         }
     }
 
-    // Additional Shopify stores (2-5)
-    for (let i = 2; i <= 5; i++) {
+    // Additional Shopify stores (2-6)
+    for (let i = 2; i <= 6; i++) {
         const urlField = document.querySelector(`[name="shopify_store_${i}_url"]`);
         const tokenField = document.querySelector(`[name="shopify_store_${i}_token"]`);
         const locationSelect = document.querySelector(`[name="shopify_store_${i}_location_id"]`);
@@ -128,8 +128,8 @@ async function saveSettings() {
         sales_sync_days: parseInt(document.querySelector('[name="sales_sync_days"]').value) || 30
     };
 
-    // Add additional Shopify stores (2-5)
-    for (let i = 2; i <= 5; i++) {
+    // Add additional Shopify stores (2-6)
+    for (let i = 2; i <= 6; i++) {
         const urlField = document.querySelector(`[name="shopify_store_${i}_url"]`);
         const tokenField = document.querySelector(`[name="shopify_store_${i}_token"]`);
         const locationSelect = document.querySelector(`[name="shopify_store_${i}_location_id"]`);

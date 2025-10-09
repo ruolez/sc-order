@@ -1012,17 +1012,169 @@ def sync_products_price():
     )
 
 
+def fetch_sales_data_from_stores(products, settings, from_date=None, to_date=None, days=None):
+    """
+    Fetch sales data from all configured Shopify stores for the given products and date range.
+
+    This helper function is used by both the sync endpoint and reports endpoint.
+    It fetches sales data in parallel from all configured stores and aggregates by SKU.
+
+    Args:
+        products: List of product dicts with upc_barcode field
+        settings: Settings dict with store configs and sales_order_tag
+        from_date: Optional datetime for start of date range
+        to_date: Optional datetime for end of date range
+        days: Optional number of days to look back (used if from_date/to_date not provided)
+
+    Returns:
+        Dictionary with:
+            - sales_by_sku: {sku: total_quantity}
+            - stores_processed: int (number of stores successfully queried)
+            - stores_failed: list of {store, error} dicts
+            - date_range: {from, to, days}
+            - tag_used: str
+    """
+    import concurrent.futures
+    from datetime import datetime, timedelta
+    import queue
+
+    # Get sales order tag from settings
+    sales_order_tag = settings.get('sales_order_tag', '').strip()
+    if not sales_order_tag:
+        raise ValueError('Sales Order Tag not configured in settings')
+
+    # Calculate date range
+    if from_date and to_date:
+        date_info = {
+            'from': from_date.strftime('%Y-%m-%d'),
+            'to': to_date.strftime('%Y-%m-%d'),
+            'days': (to_date - from_date).days + 1
+        }
+    elif days:
+        to_date = datetime.now()
+        from_date = to_date - timedelta(days=days)
+        date_info = {
+            'from': from_date.strftime('%Y-%m-%d'),
+            'to': to_date.strftime('%Y-%m-%d'),
+            'days': days
+        }
+    else:
+        # Default to last 30 days
+        days = settings.get('sales_sync_days', 30)
+        to_date = datetime.now()
+        from_date = to_date - timedelta(days=days)
+        date_info = {
+            'from': from_date.strftime('%Y-%m-%d'),
+            'to': to_date.strftime('%Y-%m-%d'),
+            'days': days
+        }
+
+    # Build list of store configurations (main + additional stores)
+    stores = []
+
+    # Main store (always first)
+    if settings.get('shopify_store_url') and settings.get('shopify_access_token'):
+        stores.append({
+            'name': 'Store 1 (Main)',
+            'url': settings['shopify_store_url'],
+            'token': settings['shopify_access_token']
+        })
+
+    # Additional stores (2-6)
+    for i in range(2, 7):
+        url = settings.get(f'shopify_store_{i}_url')
+        token = settings.get(f'shopify_store_{i}_token')
+        if url and token:
+            stores.append({
+                'name': f'Store {i}',
+                'url': url,
+                'token': token
+            })
+
+    if not stores:
+        raise ValueError('No Shopify stores configured')
+
+    # Get all SKUs from products
+    skus = [p['upc_barcode'] for p in products if p.get('upc_barcode')]
+
+    if not skus:
+        return {
+            'sales_by_sku': {},
+            'stores_processed': 0,
+            'stores_failed': [],
+            'date_range': date_info,
+            'tag_used': sales_order_tag
+        }
+
+    # Batch SKUs into groups of 50
+    batch_size = 50
+    sku_batches = [skus[i:i + batch_size] for i in range(0, len(skus), batch_size)]
+
+    # Aggregate sales across all stores and batches
+    total_sales_by_sku = {}
+    failed_stores = []
+
+    def fetch_store_sales(store_config, all_skus):
+        """Fetch sales from a single store for all SKU batches."""
+        store_name = store_config['name']
+        try:
+            client = shopify_api.ShopifyAPI(store_config['url'], store_config['token'])
+            store_sales = {}
+
+            # Process each batch of SKUs
+            for batch_skus in sku_batches:
+                batch_sales = client.get_sales_by_skus_and_tag(
+                    skus=batch_skus,
+                    order_tag=sales_order_tag,
+                    from_date=from_date,
+                    to_date=to_date,
+                    days=days,
+                    page_size=250
+                )
+
+                # Aggregate batch results
+                for sku, qty in batch_sales.items():
+                    store_sales[sku] = store_sales.get(sku, 0) + qty
+
+            return {'store': store_name, 'success': True, 'sales': store_sales}
+        except Exception as e:
+            return {'store': store_name, 'success': False, 'error': str(e)}
+
+    # Fetch from all stores in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(fetch_store_sales, store, skus) for store in stores]
+
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+
+            if result['success']:
+                # Aggregate sales from this store
+                for sku, qty in result['sales'].items():
+                    total_sales_by_sku[sku] = total_sales_by_sku.get(sku, 0) + qty
+            else:
+                failed_stores.append({'store': result['store'], 'error': result['error']})
+
+    stores_processed = len(stores) - len(failed_stores)
+
+    return {
+        'sales_by_sku': total_sales_by_sku,
+        'stores_processed': stores_processed,
+        'stores_failed': failed_stores,
+        'date_range': date_info,
+        'tag_used': sales_order_tag
+    }
+
+
 @app.route('/api/products/sync-sales', methods=['GET'])
 def sync_products_sales():
     """
-    Sync product sales quantities from multiple Shopify stores using optimized batch queries.
+    Sync product sales quantities from multiple Shopify stores.
 
-    This optimized implementation:
-    1. Splits products into batches of 50 SKUs
-    2. For each batch, queries orders filtered by tag + SKU (parallel across stores)
-    3. Aggregates quantities sold by SKU across all stores
-    4. Updates the quantity_sold_last_month field with case rounding
-    5. Provides linear progress tracking (0-100%)
+    This endpoint uses the fetch_sales_data_from_stores() helper to:
+    1. Fetch sales from all configured stores in parallel
+    2. Aggregate quantities sold by SKU across all stores
+    3. Update the quantity_sold_last_month field with case rounding
+    4. Provide product-by-product progress tracking via SSE
 
     Query Parameters:
         product_ids: Comma-separated list of product IDs to sync (syncs filtered products)
@@ -1030,18 +1182,10 @@ def sync_products_sales():
     def generate_progress():
         """Generator function to stream progress updates."""
         try:
-            import concurrent.futures
-            from datetime import datetime, timedelta
             import math
 
             settings = database.get_settings()
             all_products = database.get_products()
-
-            # Get sales order tag from settings
-            sales_order_tag = settings.get('sales_order_tag', '').strip()
-            if not sales_order_tag:
-                yield f"data: {json.dumps({'type': 'error', 'message': 'Sales Order Tag not configured in settings'})}\n\n"
-                return
 
             # Get sales sync days from settings (default to 30)
             sales_sync_days = settings.get('sales_sync_days', 30)
@@ -1057,190 +1201,85 @@ def sync_products_sales():
                 products = all_products
 
             total_products = len(products)
-
-            # Build list of store configurations (main + additional stores)
-            stores = []
-
-            # Main store (always first)
-            if settings.get('shopify_store_url') and settings.get('shopify_access_token'):
-                stores.append({
-                    'name': 'Store 1 (Main)',
-                    'url': settings['shopify_store_url'],
-                    'token': settings['shopify_access_token']
-                })
-
-            # Additional stores (2-5)
-            for i in range(2, 6):
-                url = settings.get(f'shopify_store_{i}_url')
-                token = settings.get(f'shopify_store_{i}_token')
-                if url and token:
-                    stores.append({
-                        'name': f'Store {i}',
-                        'url': url,
-                        'token': token
-                    })
-
             sse_newline = "\n\n"
-
-            if not stores:
-                yield f"data: {json.dumps({'type': 'error', 'message': 'No Shopify stores configured'})}{sse_newline}"
-                return
-
-            total_stores = len(stores)
-            batch_size = 50
-            total_batches = math.ceil(len(products) / batch_size)
 
             # Send initial progress
             yield f"data: {json.dumps({'type': 'start', 'total': total_products, 'current': 0})}{sse_newline}"
-            status_msg = f'Syncing sales from {total_stores} store(s) with tag "{sales_order_tag}"'
-            yield f"data: {json.dumps({'type': 'status', 'message': status_msg})}{sse_newline}"
+            yield f"data: {json.dumps({'type': 'status', 'message': 'Fetching sales data from all stores...'})}{sse_newline}"
 
-            # Process products in batches
+            # Fetch sales data using helper function
+            try:
+                sales_result = fetch_sales_data_from_stores(
+                    products=products,
+                    settings=settings,
+                    days=sales_sync_days
+                )
+            except ValueError as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}{sse_newline}"
+                return
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to fetch sales data: {str(e)}'})}{sse_newline}"
+                return
+
+            # Report fetch completion
+            stores_processed = sales_result['stores_processed']
+            stores_failed = sales_result['stores_failed']
+            sales_by_sku = sales_result['sales_by_sku']
+            date_range = sales_result['date_range']
+            tag_used = sales_result['tag_used']
+
+            msg = f'Fetched sales from {stores_processed} store(s) with tag "{tag_used}" ({date_range["from"]} to {date_range["to"]})'
+            yield f"data: {json.dumps({'type': 'status', 'message': msg})}{sse_newline}"
+
+            if stores_failed:
+                for failed in stores_failed:
+                    error_msg = f'✗ {failed.get("store")}: {failed.get("error")}'
+                    yield f"data: {json.dumps({'type': 'status', 'message': error_msg})}{sse_newline}"
+
+            # Process each product and update database
             all_updates = []
             synced_count = 0
             not_found_count = 0
             not_found_products = []
 
-            for batch_num in range(total_batches):
-                batch_start = batch_num * batch_size
-                batch_end = min(batch_start + batch_size, len(products))
-                batch = products[batch_start:batch_end]
+            for idx, product in enumerate(products):
+                current_index = idx + 1
+                upc_barcode = product.get('upc_barcode')
 
-                # Get SKUs for this batch
-                batch_skus = [p['upc_barcode'] for p in batch if p.get('upc_barcode')]
-
-                if not batch_skus:
-                    # Skip batch if no SKUs
-                    for product in batch:
-                        current_index = batch_start + batch.index(product) + 1
-                        yield f"data: {json.dumps({'type': 'progress', 'current': current_index, 'total': total_products, 'product_name': product.get('product_name', 'Unknown'), 'status': 'skipped', 'message': 'No UPC barcode'})}{sse_newline}"
+                if not upc_barcode:
+                    yield f"data: {json.dumps({'type': 'progress', 'current': current_index, 'total': total_products, 'product_name': product.get('product_name', 'Unknown'), 'status': 'skipped', 'message': 'No UPC barcode'})}{sse_newline}"
                     continue
 
-                # Status: Starting batch fetch
-                yield f"data: {json.dumps({'type': 'status', 'message': f'Fetching batch {batch_num + 1}/{total_batches} ({len(batch_skus)} SKUs) from {total_stores} store(s)...'})}{sse_newline}"
+                try:
+                    quantity_per_case = product.get('quantity_per_case') or 0
+                    total_sales = sales_by_sku.get(upc_barcode, 0)
 
-                # PARALLEL FETCH from all stores for this batch
-                import queue
-                progress_queue = queue.Queue()
-
-                def fetch_store_batch_sales(store_config, batch_skus, sales_order_tag, progress_queue):
-                    """Fetch sales from a single store for a batch of SKUs."""
-                    store_name = store_config['name']
-                    try:
-                        client = shopify_api.ShopifyAPI(store_config['url'], store_config['token'])
-
-                        # Progress callback to report pagination
-                        def progress_callback(page_num, total_orders):
-                            progress_queue.put({
-                                'type': 'store_page',
-                                'store': store_name,
-                                'page': page_num,
-                                'orders': total_orders
-                            })
-
-                        sales_data = client.get_sales_by_skus_and_tag(
-                            skus=batch_skus,
-                            order_tag=sales_order_tag,
-                            days=sales_sync_days,
-                            page_size=250,
-                            progress_callback=progress_callback
-                        )
-
-                        progress_queue.put({
-                            'type': 'store_complete',
-                            'store': store_name,
-                            'success': True,
-                            'sales': sales_data
-                        })
-                    except Exception as e:
-                        progress_queue.put({
-                            'type': 'store_complete',
-                            'store': store_name,
-                            'success': False,
-                            'error': str(e)
-                        })
-
-                # Aggregate sales across stores for this batch
-                batch_aggregated_sales = {}
-                completed_stores = 0
-                failed_stores = []
-
-                # Start parallel fetch for all stores
-                with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                    futures = [
-                        executor.submit(fetch_store_batch_sales, store, batch_skus, sales_order_tag, progress_queue)
-                        for store in stores
-                    ]
-
-                    # Poll queue for progress updates
-                    while any(not f.done() for f in futures) or not progress_queue.empty():
-                        try:
-                            message = progress_queue.get(timeout=0.1)
-
-                            if message['type'] == 'store_page':
-                                msg = f"{message['store']}: Page {message['page']} ({message['orders']} orders)"
-                                yield f"data: {json.dumps({'type': 'status', 'message': msg})}{sse_newline}"
-
-                            elif message['type'] == 'store_complete':
-                                completed_stores += 1
-
-                                if message['success']:
-                                    # Aggregate sales from this store
-                                    for sku, qty in message['sales'].items():
-                                        batch_aggregated_sales[sku] = batch_aggregated_sales.get(sku, 0) + qty
-
-                                    msg = f"✓ {message['store']}: {len(message['sales'])} SKUs found"
-                                    yield f"data: {json.dumps({'type': 'status', 'message': msg})}{sse_newline}"
-                                else:
-                                    failed_stores.append({'store': message['store'], 'error': message['error']})
-                                    msg = f"✗ {message['store']}: {message['error']}"
-                                    yield f"data: {json.dumps({'type': 'status', 'message': msg})}{sse_newline}"
-
-                        except queue.Empty:
-                            continue
-
-                # Status: Batch fetched, now processing products
-                yield f"data: {json.dumps({'type': 'status', 'message': f'Processing batch {batch_num + 1}/{total_batches} products...'})}{sse_newline}"
-
-                # Process each product in the batch
-                for idx, product in enumerate(batch):
-                    current_index = batch_start + idx + 1
-                    upc_barcode = product.get('upc_barcode')
-
-                    if not upc_barcode:
-                        yield f"data: {json.dumps({'type': 'progress', 'current': current_index, 'total': total_products, 'product_name': product.get('product_name', 'Unknown'), 'status': 'skipped', 'message': 'No UPC barcode'})}{sse_newline}"
-                        continue
-
-                    try:
-                        quantity_per_case = product.get('quantity_per_case') or 0
-                        total_sales = batch_aggregated_sales.get(upc_barcode, 0)
-
-                        if total_sales > 0:
-                            # Round up to nearest full case
-                            if quantity_per_case > 0:
-                                order_quantity = math.ceil(total_sales / quantity_per_case) * quantity_per_case
-                            else:
-                                order_quantity = total_sales
-
-                            all_updates.append((product['id'], order_quantity))
-                            synced_count += 1
-
-                            yield f"data: {json.dumps({'type': 'progress', 'current': current_index, 'total': total_products, 'product_name': product.get('product_name', 'Unknown'), 'status': 'synced', 'quantity': order_quantity})}{sse_newline}"
+                    if total_sales > 0:
+                        # Round up to nearest full case
+                        if quantity_per_case > 0:
+                            order_quantity = math.ceil(total_sales / quantity_per_case) * quantity_per_case
                         else:
-                            # No sales found - use 1 case as minimum
-                            fallback_quantity = quantity_per_case if quantity_per_case > 0 else 0
-                            all_updates.append((product['id'], fallback_quantity))
-                            not_found_count += 1
-                            not_found_products.append({
-                                'product_name': product.get('product_name', 'Unknown'),
-                                'upc_barcode': upc_barcode
-                            })
+                            order_quantity = total_sales
 
-                            yield f"data: {json.dumps({'type': 'progress', 'current': current_index, 'total': total_products, 'product_name': product.get('product_name', 'Unknown'), 'status': 'not_found', 'fallback_quantity': fallback_quantity})}{sse_newline}"
+                        all_updates.append((product['id'], order_quantity))
+                        synced_count += 1
 
-                    except Exception as e:
-                        print(f"Error processing product {product.get('product_name')}: {e}")
-                        yield f"data: {json.dumps({'type': 'progress', 'current': current_index, 'total': total_products, 'product_name': product.get('product_name', 'Unknown'), 'status': 'error', 'message': str(e)})}{sse_newline}"
+                        yield f"data: {json.dumps({'type': 'progress', 'current': current_index, 'total': total_products, 'product_name': product.get('product_name', 'Unknown'), 'status': 'synced', 'quantity': order_quantity})}{sse_newline}"
+                    else:
+                        # No sales found - use 1 case as minimum
+                        fallback_quantity = quantity_per_case if quantity_per_case > 0 else 0
+                        all_updates.append((product['id'], fallback_quantity))
+                        not_found_count += 1
+                        not_found_products.append({
+                            'product_name': product.get('product_name', 'Unknown'),
+                            'upc_barcode': upc_barcode
+                        })
+
+                        yield f"data: {json.dumps({'type': 'progress', 'current': current_index, 'total': total_products, 'product_name': product.get('product_name', 'Unknown'), 'status': 'not_found', 'fallback_quantity': fallback_quantity})}{sse_newline}"
+
+                except Exception as e:
+                    print(f"Error processing product {product.get('product_name')}: {e}")
+                    yield f"data: {json.dumps({'type': 'progress', 'current': current_index, 'total': total_products, 'product_name': product.get('product_name', 'Unknown'), 'status': 'error', 'message': str(e)})}{sse_newline}"
 
             # BULK UPDATE all products in single transaction
             if all_updates:
@@ -1258,9 +1297,9 @@ def sync_products_sales():
                 'not_found': not_found_count,
                 'not_found_products': not_found_products,
                 'total': total_products,
-                'stores_processed': total_stores,
-                'stores_failed': len(failed_stores),
-                'failed_stores': failed_stores
+                'stores_processed': stores_processed,
+                'stores_failed': len(stores_failed),
+                'failed_stores': stores_failed
             }
             yield f"data: {json.dumps(completion_data)}{sse_newline}"
 
@@ -1278,6 +1317,301 @@ def sync_products_sales():
             'X-Accel-Buffering': 'no'
         }
     )
+
+
+# Reports endpoints
+@app.route('/api/reports/sc-sales', methods=['GET'])
+def get_sc_sales_report():
+    """
+    Get SC Sales report for a custom date range.
+
+    This is a read-only endpoint that fetches sales data from all configured
+    Shopify stores and returns aggregated sales by product.
+
+    Query Parameters:
+        from_date: Start date in YYYY-MM-DD format (required)
+        to_date: End date in YYYY-MM-DD format (required)
+
+    Returns:
+        JSON with:
+            - products: List of products with sales data
+            - summary: Aggregated statistics
+            - date_range: Date range used
+            - stores_info: Store processing status
+    """
+    try:
+        from datetime import datetime
+
+        # Get and validate query parameters
+        from_date_str = request.args.get('from_date')
+        to_date_str = request.args.get('to_date')
+
+        if not from_date_str or not to_date_str:
+            return jsonify({'error': 'Both from_date and to_date are required'}), 400
+
+        try:
+            from_date = datetime.strptime(from_date_str, '%Y-%m-%d')
+            to_date = datetime.strptime(to_date_str, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+
+        if from_date > to_date:
+            return jsonify({'error': 'from_date must be before or equal to to_date'}), 400
+
+        # Get all products and settings
+        settings = database.get_settings()
+        all_products = database.get_products()
+
+        if not all_products:
+            return jsonify({
+                'products': [],
+                'summary': {
+                    'total_products': 0,
+                    'products_with_sales': 0,
+                    'total_items_sold': 0
+                },
+                'date_range': {
+                    'from': from_date_str,
+                    'to': to_date_str,
+                    'days': (to_date - from_date).days + 1
+                },
+                'stores_info': {
+                    'stores_processed': 0,
+                    'stores_failed': []
+                }
+            })
+
+        # Fetch sales data using helper function
+        try:
+            sales_result = fetch_sales_data_from_stores(
+                products=all_products,
+                settings=settings,
+                from_date=from_date,
+                to_date=to_date
+            )
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        except Exception as e:
+            return jsonify({'error': f'Failed to fetch sales data: {str(e)}'}), 500
+
+        # Build report data
+        sales_by_sku = sales_result['sales_by_sku']
+        report_products = []
+        total_items_sold = 0
+        products_with_sales = 0
+        total_sales_value = 0.0
+
+        for product in all_products:
+            upc_barcode = product.get('upc_barcode')
+
+            if not upc_barcode:
+                continue
+
+            quantity_sold = sales_by_sku.get(upc_barcode, 0)
+
+            # Skip products with no sales
+            if quantity_sold == 0:
+                continue
+
+            products_with_sales += 1
+            total_items_sold += quantity_sold
+
+            # Calculate estimated total (qty × price)
+            price = product.get('price') or 0
+            estimated_total = quantity_sold * price
+            total_sales_value += estimated_total
+
+            report_products.append({
+                'id': product.get('id'),
+                'product_name': product.get('product_name'),
+                'upc_barcode': upc_barcode,
+                'quantity_sold': quantity_sold,
+                'price': price,
+                'estimated_total': estimated_total,
+                'quantity_per_case': product.get('quantity_per_case'),
+                'available_quantity': product.get('available_quantity'),
+                'threshold_quantity': product.get('threshold_quantity')
+            })
+
+        # Sort by quantity_sold descending (highest sales first)
+        report_products.sort(key=lambda x: x['quantity_sold'], reverse=True)
+
+        # Build response
+        response = {
+            'products': report_products,
+            'summary': {
+                'total_products': len(report_products),
+                'products_with_sales': products_with_sales,
+                'total_items_sold': total_items_sold,
+                'total_sales_value': total_sales_value
+            },
+            'date_range': sales_result['date_range'],
+            'stores_info': {
+                'stores_processed': sales_result['stores_processed'],
+                'stores_failed': sales_result['stores_failed'],
+                'tag_used': sales_result['tag_used']
+            }
+        }
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"SC Sales report error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/reports/sc-sales/export', methods=['POST'])
+def export_sc_sales_report():
+    """
+    Export SC Sales report to Excel file.
+
+    Request Body:
+        {
+            "from_date": "YYYY-MM-DD",
+            "to_date": "YYYY-MM-DD"
+        }
+
+    Returns:
+        Excel file download with sales report data
+    """
+    try:
+        from datetime import datetime
+        import pandas as pd
+        import io
+        from flask import send_file
+
+        # Get and validate request data
+        data = request.json
+        from_date_str = data.get('from_date')
+        to_date_str = data.get('to_date')
+
+        if not from_date_str or not to_date_str:
+            return jsonify({'error': 'Both from_date and to_date are required'}), 400
+
+        try:
+            from_date = datetime.strptime(from_date_str, '%Y-%m-%d')
+            to_date = datetime.strptime(to_date_str, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
+
+        if from_date > to_date:
+            return jsonify({'error': 'from_date must be before or equal to to_date'}), 400
+
+        # Get all products and settings
+        settings = database.get_settings()
+        all_products = database.get_products()
+
+        if not all_products:
+            return jsonify({'error': 'No products found'}), 404
+
+        # Fetch sales data using helper function
+        try:
+            sales_result = fetch_sales_data_from_stores(
+                products=all_products,
+                settings=settings,
+                from_date=from_date,
+                to_date=to_date
+            )
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        except Exception as e:
+            return jsonify({'error': f'Failed to fetch sales data: {str(e)}'}), 500
+
+        # Build export data
+        sales_by_sku = sales_result['sales_by_sku']
+        export_data = []
+
+        for product in all_products:
+            upc_barcode = product.get('upc_barcode')
+
+            if not upc_barcode:
+                continue
+
+            quantity_sold = sales_by_sku.get(upc_barcode, 0)
+
+            # Skip products with no sales
+            if quantity_sold == 0:
+                continue
+
+            # Calculate estimated total (qty × price)
+            price = product.get('price') or 0
+            estimated_total = quantity_sold * price
+
+            export_data.append({
+                'Product Name': product.get('product_name'),
+                'UPC Barcode': upc_barcode,
+                'Quantity Sold': quantity_sold,
+                'Price': price,
+                'Estimated Total': estimated_total,
+                'Case Qty': product.get('quantity_per_case'),
+                'Available Stock': product.get('available_quantity'),
+                'Threshold': product.get('threshold_quantity')
+            })
+
+        # Sort by quantity sold descending
+        export_data.sort(key=lambda x: x['Quantity Sold'], reverse=True)
+
+        # Create DataFrame
+        df = pd.DataFrame(export_data)
+
+        # Create Excel file in memory
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='SC Sales Report')
+
+            # Calculate total sales value
+            total_sales_value = sum(item['Estimated Total'] for item in export_data)
+
+            # Add summary sheet
+            summary_data = {
+                'Metric': [
+                    'Report Period',
+                    'From Date',
+                    'To Date',
+                    'Number of Days',
+                    'Total Products',
+                    'Products with Sales',
+                    'Total Items Sold',
+                    'Total Sales Value',
+                    'Stores Processed',
+                    'Tag Used'
+                ],
+                'Value': [
+                    f"{from_date_str} to {to_date_str}",
+                    from_date_str,
+                    to_date_str,
+                    sales_result['date_range']['days'],
+                    len(export_data),
+                    sum(1 for item in export_data if item['Quantity Sold'] > 0),
+                    sum(item['Quantity Sold'] for item in export_data),
+                    f"${total_sales_value:,.2f}",
+                    sales_result['stores_processed'],
+                    sales_result['tag_used']
+                ]
+            }
+            summary_df = pd.DataFrame(summary_data)
+            summary_df.to_excel(writer, index=False, sheet_name='Summary')
+
+        output.seek(0)
+
+        # Generate filename with date range
+        filename = f'sc_sales_report_{from_date_str}_to_{to_date_str}.xlsx'
+
+        # Return file as download
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        print(f"SC Sales export error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Error exporting report: {str(e)}'}), 500
 
 
 if __name__ == '__main__':

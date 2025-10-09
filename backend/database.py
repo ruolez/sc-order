@@ -71,7 +71,7 @@ def init_database():
     if 'quantity_sold_last_month' not in products_columns:
         cursor.execute('ALTER TABLE products ADD COLUMN quantity_sold_last_month INTEGER')
 
-    # Add additional Shopify store columns for multi-store sales sync (stores 2-5)
+    # Add additional Shopify store columns for multi-store sales sync (stores 2-6)
     cursor.execute("PRAGMA table_info(settings)")
     settings_columns = [column[1] for column in cursor.fetchall()]
 
@@ -79,7 +79,8 @@ def init_database():
         'shopify_store_2_url', 'shopify_store_2_token', 'shopify_store_2_location_id',
         'shopify_store_3_url', 'shopify_store_3_token', 'shopify_store_3_location_id',
         'shopify_store_4_url', 'shopify_store_4_token', 'shopify_store_4_location_id',
-        'shopify_store_5_url', 'shopify_store_5_token', 'shopify_store_5_location_id'
+        'shopify_store_5_url', 'shopify_store_5_token', 'shopify_store_5_location_id',
+        'shopify_store_6_url', 'shopify_store_6_token', 'shopify_store_6_location_id'
     ]
 
     for column in additional_store_columns:
@@ -143,6 +144,9 @@ def update_settings(settings: Dict[str, Any]) -> bool:
             shopify_store_5_url = ?,
             shopify_store_5_token = ?,
             shopify_store_5_location_id = ?,
+            shopify_store_6_url = ?,
+            shopify_store_6_token = ?,
+            shopify_store_6_location_id = ?,
             sales_order_tag = ?,
             sales_sync_days = ?
         WHERE id = 1
@@ -168,6 +172,9 @@ def update_settings(settings: Dict[str, Any]) -> bool:
         settings.get('shopify_store_5_url'),
         settings.get('shopify_store_5_token'),
         settings.get('shopify_store_5_location_id'),
+        settings.get('shopify_store_6_url'),
+        settings.get('shopify_store_6_token'),
+        settings.get('shopify_store_6_location_id'),
         settings.get('sales_order_tag', ''),
         settings.get('sales_sync_days', 30)
     ))
