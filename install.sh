@@ -109,9 +109,6 @@ update_application() {
         fi
     fi
 
-    # Save current port configuration before pulling
-    CURRENT_PORT_CONFIG=$(grep '".*:80"' docker-compose.yml 2>/dev/null || echo "")
-
     # Pull latest changes from GitHub
     print_step "Pulling latest changes from GitHub..."
     if git pull origin "${CURRENT_BRANCH}"; then
@@ -121,12 +118,10 @@ update_application() {
         exit 1
     fi
 
-    # Restore port configuration if it was different from default
-    if [ ! -z "$CURRENT_PORT_CONFIG" ] && [ "$CURRENT_PORT_CONFIG" != '      - "5001:80"' ]; then
-        print_step "Restoring port configuration..."
-        sed -i.bak 's|      - "5001:80"|'"$CURRENT_PORT_CONFIG"'|' docker-compose.yml
-        print_success "Port configuration restored"
-    fi
+    # Set production port to 80
+    print_step "Configuring production port..."
+    sed -i.bak 's|      - "5001:80"|      - "80:80"|' docker-compose.yml
+    print_success "Port set to 80 for production"
 
     # Stop running containers
     print_step "Stopping containers..."
