@@ -51,6 +51,165 @@ print_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
+# Function to update application from GitHub
+update_application() {
+    echo -e "\n${BLUE}╔════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║   Update from GitHub                           ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════════════╝${NC}\n"
+
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        print_error "Not a git repository. Cannot update from GitHub."
+        print_warning "Please clone the repository using: git clone https://github.com/ruolez/sc-order.git"
+        exit 1
+    fi
+
+    # Show current git status
+    print_step "Current Repository Status"
+    CURRENT_BRANCH=$(git branch --show-current)
+    CURRENT_COMMIT=$(git log -1 --format="%h - %s" 2>/dev/null || echo "Unknown")
+    echo "Branch: ${CURRENT_BRANCH}"
+    echo "Commit: ${CURRENT_COMMIT}"
+
+    # Check for uncommitted changes
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        print_warning "You have uncommitted local changes"
+        git status --short
+        echo ""
+        read -p "Continue with update anyway? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_error "Update cancelled"
+            exit 1
+        fi
+    fi
+
+    # Database backup handling
+    BACKUP_FILE=""
+    if [ -f "./data/inventory.db" ]; then
+        echo -e "\n${YELLOW}Database Backup${NC}"
+        read -p "Backup database before updating? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            print_step "Creating database backup..."
+
+            # Create backups directory if it doesn't exist
+            mkdir -p ./data/backups
+
+            # Create timestamped backup
+            BACKUP_FILE="./data/backups/inventory.db.backup.$(date +%Y%m%d_%H%M%S)"
+            cp ./data/inventory.db "$BACKUP_FILE"
+
+            if [ -f "$BACKUP_FILE" ]; then
+                print_success "Database backed up to: $BACKUP_FILE"
+            else
+                print_error "Failed to create backup"
+                exit 1
+            fi
+        fi
+    fi
+
+    # Pull latest changes from GitHub
+    print_step "Pulling latest changes from GitHub..."
+    if git pull origin "${CURRENT_BRANCH}"; then
+        print_success "Code updated successfully"
+    else
+        print_error "Failed to pull changes from GitHub"
+        exit 1
+    fi
+
+    # Stop running containers
+    print_step "Stopping containers..."
+    if command -v docker &> /dev/null; then
+        sg docker -c "docker compose down" || {
+            print_error "Failed to stop containers"
+            exit 1
+        }
+        print_success "Containers stopped"
+    fi
+
+    # Rebuild Docker images
+    print_step "Rebuilding Docker images (this may take a few minutes)..."
+    sg docker -c "docker compose build --no-cache" || {
+        print_error "Failed to build Docker images"
+        exit 1
+    }
+    print_success "Docker images rebuilt successfully"
+
+    # Start containers
+    print_step "Starting containers..."
+    sg docker -c "docker compose up -d" || {
+        print_error "Failed to start containers"
+        exit 1
+    }
+    print_success "Containers started"
+
+    # Database restoration check
+    if [ ! -z "$BACKUP_FILE" ]; then
+        print_step "Verifying database..."
+        if [ -f "./data/inventory.db" ]; then
+            print_success "Database intact, backup preserved at: $BACKUP_FILE"
+        else
+            print_warning "Database not found, restoring from backup..."
+            cp "$BACKUP_FILE" ./data/inventory.db
+            if [ -f "./data/inventory.db" ]; then
+                print_success "Database restored successfully from: $BACKUP_FILE"
+            else
+                print_error "Failed to restore database"
+                exit 1
+            fi
+        fi
+    fi
+
+    # Wait for services to be healthy
+    print_step "Waiting for services to be ready..."
+    echo "This may take up to 60 seconds..."
+    sleep 10
+
+    # Check container status
+    MAX_RETRIES=12
+    RETRY_COUNT=0
+    while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+        if sg docker -c "docker compose ps" | grep -q "healthy"; then
+            print_success "All services are healthy"
+            break
+        fi
+
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+            echo "Waiting... ($RETRY_COUNT/$MAX_RETRIES)"
+            sleep 5
+        else
+            print_warning "Services started but health checks are still pending"
+            print_warning "Check 'docker compose ps' for status"
+        fi
+    done
+
+    # Display container status
+    print_step "Container Status"
+    sg docker -c "docker compose ps"
+
+    # Update complete
+    echo -e "\n${GREEN}╔════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║   Update Complete! ✓                           ║${NC}"
+    echo -e "${GREEN}╚════════════════════════════════════════════════╝${NC}\n"
+
+    # Access information
+    echo -e "${BLUE}Access Information:${NC}"
+    APP_PORT=$(grep '".*:80"' docker-compose.yml | awk -F'[:"]+' '{print $2}' || echo "5001")
+    LOCAL_IP=$(hostname -I | awk '{print $1}' 2>/dev/null || ipconfig getifaddr en0 2>/dev/null || echo "localhost")
+    echo "  • Local:    http://localhost:${APP_PORT}"
+    echo "  • Network:  http://${LOCAL_IP}:${APP_PORT}"
+
+    if [ ! -z "$BACKUP_FILE" ]; then
+        echo -e "\n${BLUE}Backup Information:${NC}"
+        echo "  • Backup saved at: $BACKUP_FILE"
+    fi
+
+    echo ""
+    exit 0
+}
+
 # Check Ubuntu version
 print_step "Checking Ubuntu version..."
 if [ -f /etc/os-release ]; then
@@ -99,67 +258,87 @@ if [ "$EXISTING_INSTALL" = true ]; then
     echo -e "${YELLOW}║   Existing Installation Detected              ║${NC}"
     echo -e "${YELLOW}╚════════════════════════════════════════════════╝${NC}\n"
 
-    read -p "Do you want to remove the existing installation? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        print_step "Removing existing installation..."
+    echo "What would you like to do?"
+    echo "  [1] Update from GitHub (pull latest code, keep data)"
+    echo "  [2] Fresh Install (remove everything and start clean)"
+    echo "  [3] Cancel"
+    echo ""
+    read -p "Choose an option [1/2/3]: " -n 1 -r INSTALL_CHOICE
+    echo ""
 
-        # Stop and remove containers
-        if command -v docker &> /dev/null; then
-            if sg docker -c "docker compose ps -q" &> /dev/null; then
-                print_step "Stopping containers..."
-                sg docker -c "docker compose down" || true
-                print_success "Containers stopped"
-            fi
+    case $INSTALL_CHOICE in
+        1)
+            # Update from GitHub
+            update_application
+            ;;
+        2)
+            # Fresh Install - Remove existing installation
+            print_step "Removing existing installation..."
 
-            # Remove SC-Order images
-            IMAGES=$(sg docker -c "docker images --format '{{.Repository}}:{{.Tag}}'" | grep "sc-order" || true)
-            if [ ! -z "$IMAGES" ]; then
-                print_step "Removing Docker images..."
-                echo "$IMAGES" | while read -r image; do
-                    sg docker -c "docker rmi $image" || true
-                done
-                print_success "Docker images removed"
-            fi
-        fi
-
-        # Remove systemd service
-        if [ -f "/etc/systemd/system/sc-order.service" ]; then
-            print_step "Removing systemd service..."
-            sudo systemctl stop sc-order.service 2>/dev/null || true
-            sudo systemctl disable sc-order.service 2>/dev/null || true
-            sudo rm -f /etc/systemd/system/sc-order.service
-            sudo systemctl daemon-reload
-            print_success "Systemd service removed"
-        fi
-
-        # Ask about data directory
-        if [ -d "./data" ]; then
-            echo -e "\n${YELLOW}Data Directory Found${NC}"
-            read -p "Do you want to delete the existing database? (y/N): " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                print_step "Backing up database..."
-                BACKUP_FILE="./data/inventory.db.backup.$(date +%Y%m%d_%H%M%S)"
-                cp ./data/inventory.db "$BACKUP_FILE" 2>/dev/null || true
-                if [ -f "$BACKUP_FILE" ]; then
-                    print_success "Database backed up to: $BACKUP_FILE"
+            # Stop and remove containers
+            if command -v docker &> /dev/null; then
+                if sg docker -c "docker compose ps -q" &> /dev/null; then
+                    print_step "Stopping containers..."
+                    sg docker -c "docker compose down" || true
+                    print_success "Containers stopped"
                 fi
 
-                rm -rf ./data
-                print_success "Data directory removed"
-            else
-                print_warning "Keeping existing database"
+                # Remove SC-Order images
+                IMAGES=$(sg docker -c "docker images --format '{{.Repository}}:{{.Tag}}'" | grep "sc-order" || true)
+                if [ ! -z "$IMAGES" ]; then
+                    print_step "Removing Docker images..."
+                    echo "$IMAGES" | while read -r image; do
+                        sg docker -c "docker rmi $image" || true
+                    done
+                    print_success "Docker images removed"
+                fi
             fi
-        fi
 
-        print_success "Existing installation removed"
-        echo ""
-    else
-        print_error "Installation cancelled"
-        echo "Please manually remove the existing installation or choose a different directory"
-        exit 1
-    fi
+            # Remove systemd service
+            if [ -f "/etc/systemd/system/sc-order.service" ]; then
+                print_step "Removing systemd service..."
+                sudo systemctl stop sc-order.service 2>/dev/null || true
+                sudo systemctl disable sc-order.service 2>/dev/null || true
+                sudo rm -f /etc/systemd/system/sc-order.service
+                sudo systemctl daemon-reload
+                print_success "Systemd service removed"
+            fi
+
+            # Ask about data directory
+            if [ -d "./data" ]; then
+                echo -e "\n${YELLOW}Data Directory Found${NC}"
+                read -p "Do you want to delete the existing database? (y/N): " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    print_step "Backing up database..."
+                    mkdir -p ./data/backups
+                    BACKUP_FILE="./data/backups/inventory.db.backup.$(date +%Y%m%d_%H%M%S)"
+                    cp ./data/inventory.db "$BACKUP_FILE" 2>/dev/null || true
+                    if [ -f "$BACKUP_FILE" ]; then
+                        print_success "Database backed up to: $BACKUP_FILE"
+                    fi
+
+                    rm -rf ./data
+                    print_success "Data directory removed"
+                else
+                    print_warning "Keeping existing database"
+                fi
+            fi
+
+            print_success "Existing installation removed"
+            echo ""
+            ;;
+        3)
+            # Cancel
+            print_error "Installation cancelled"
+            exit 0
+            ;;
+        *)
+            # Invalid choice
+            print_error "Invalid choice. Installation cancelled."
+            exit 1
+            ;;
+    esac
 fi
 
 # Ask for server IP
