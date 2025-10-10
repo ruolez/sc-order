@@ -620,9 +620,9 @@ class ShopifyAPI:
 
         return sales_by_sku
 
-    def get_sales_by_skus_and_tag(self, skus: List[str], order_tag: str, days: int = 30, page_size: int = 250, progress_callback=None) -> Dict[str, int]:
+    def get_sales_by_skus_and_tag(self, skus: List[str], order_tag: str, from_date=None, to_date=None, days: int = None, page_size: int = 250, progress_callback=None) -> Dict[str, int]:
         """
-        Get aggregated sales quantities by SKU filtered by order tag in the last N days.
+        Get aggregated sales quantities by SKU filtered by order tag for a date range.
         Uses batch SKU filtering with OR syntax for optimal performance.
 
         This method is optimized for speed by:
@@ -633,7 +633,9 @@ class ShopifyAPI:
         Args:
             skus: List of product SKUs to search for (recommended max 50 per batch)
             order_tag: Tag to filter orders by (e.g., "warehouse-main")
-            days: Number of days to look back (default: 30)
+            from_date: Optional datetime object for start of date range
+            to_date: Optional datetime object for end of date range
+            days: Optional number of days to look back (used if from_date/to_date not provided)
             page_size: Number of orders per page (default: 250, max: 250)
             progress_callback: Optional callback function(page_num, total_orders) for progress updates
 
@@ -643,13 +645,26 @@ class ShopifyAPI:
         if not skus or not order_tag:
             return {}
 
-        # Calculate date threshold
-        date_threshold = datetime.now() - timedelta(days=days)
-        date_filter = date_threshold.strftime('%Y-%m-%dT%H:%M:%SZ')
+        # Build date filter based on parameters
+        if from_date and to_date:
+            # Use custom date range
+            from_filter = from_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+            to_filter = to_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+            date_query = f'created_at:>={from_filter} AND created_at:<={to_filter}'
+        elif days:
+            # Use days parameter (backward compatible)
+            date_threshold = datetime.now() - timedelta(days=days)
+            date_filter = date_threshold.strftime('%Y-%m-%dT%H:%M:%SZ')
+            date_query = f'created_at:>={date_filter}'
+        else:
+            # Default to last 30 days if no parameters provided
+            date_threshold = datetime.now() - timedelta(days=30)
+            date_filter = date_threshold.strftime('%Y-%m-%dT%H:%M:%SZ')
+            date_query = f'created_at:>={date_filter}'
 
-        # Build query: "created_at:>=DATE AND tag:TAG AND (sku:A OR sku:B OR ...)"
+        # Build query: "created_at filters AND tag:TAG AND (sku:A OR sku:B OR ...)"
         sku_query = ' OR '.join([f'sku:{sku}' for sku in skus])
-        query_string = f'created_at:>={date_filter} AND tag:{order_tag} AND ({sku_query})'
+        query_string = f'{date_query} AND tag:{order_tag} AND ({sku_query})'
 
         # Simplified GraphQL query - no fulfillmentOrders needed!
         query = """
