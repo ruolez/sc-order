@@ -535,7 +535,7 @@ def create_quotation():
             'QuotationDate': quotation_date,
             'QuotationTitle': quotation_title,
             'PoNumber': po_number,
-            'AutoOrderNo': '',
+            'AutoOrderNo': None,
             'ExpirationDate': expiration_date,
             'CustomerID': customer_id,
             'BusinessName': customer.get('BusinessName'),
