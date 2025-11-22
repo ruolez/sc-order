@@ -228,7 +228,6 @@ body {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 0.75rem;
-    overflow: hidden;
 }
 
 .table-header {
@@ -253,8 +252,6 @@ body {
 /* Table */
 .table-container {
     overflow-x: auto;
-    overflow-y: auto;
-    max-height: calc(100vh - 300px);
 }
 
 table {
