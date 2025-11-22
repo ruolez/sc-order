@@ -64,17 +64,14 @@ async function loadProducts() {
 
 // Toggle order filter (show only products that need to be ordered)
 function toggleOrderFilter() {
-  orderFilterActive = !orderFilterActive;
+  if (orderFilterActive) return; // Already active, use "All" button to clear
+
+  orderFilterActive = true;
   const btn = document.getElementById("order-filter-btn");
   const allBtn = document.getElementById("all-filter-btn");
 
-  if (orderFilterActive) {
-    btn.classList.add("active");
-    allBtn.classList.remove("active");
-  } else {
-    btn.classList.remove("active");
-    allBtn.classList.add("active");
-  }
+  btn.classList.add("active");
+  allBtn.classList.remove("active");
 
   applyFilters();
 }
