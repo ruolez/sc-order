@@ -1252,14 +1252,18 @@ def sync_products_sales():
 
                 try:
                     quantity_per_case = product.get('quantity_per_case') or 0
+                    threshold_quantity = product.get('threshold_quantity') or 0
                     total_sales = sales_by_sku.get(upc_barcode, 0)
 
                     if total_sales > 0:
+                        # Use the higher of total_sales or threshold_quantity
+                        base_quantity = max(total_sales, threshold_quantity)
+
                         # Round up to nearest full case
                         if quantity_per_case > 0:
-                            order_quantity = math.ceil(total_sales / quantity_per_case) * quantity_per_case
+                            order_quantity = math.ceil(base_quantity / quantity_per_case) * quantity_per_case
                         else:
-                            order_quantity = total_sales
+                            order_quantity = base_quantity
 
                         all_updates.append((product['id'], order_quantity))
                         synced_count += 1
