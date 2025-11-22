@@ -251,7 +251,7 @@ body {
 
 /* Table */
 .table-container {
-    overflow-x: auto;
+    /* No overflow to allow sticky header to work */
 }
 
 table {
