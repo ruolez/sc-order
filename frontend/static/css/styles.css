@@ -264,6 +264,9 @@ thead {
     background: var(--bg-tertiary);
     border-top: 1px solid var(--border-color);
     border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 10;
 }
 
 th {
