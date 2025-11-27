@@ -100,17 +100,9 @@ configure_dashboard_embedding() {
 
     print_success "Updated nginx configuration"
 
-    # Rebuild and restart nginx container
-    print_step "Rebuilding nginx container..."
-    if sg docker -c "docker compose build --no-cache nginx" 2>&1; then
-        print_success "Nginx container rebuilt"
-    else
-        print_error "Failed to rebuild nginx container"
-        return 1
-    fi
-
+    # Restart nginx container only (config is mounted as volume, no rebuild needed)
     print_step "Restarting nginx container..."
-    if sg docker -c "docker compose up -d nginx" 2>&1; then
+    if sg docker -c "docker compose restart nginx" 2>&1; then
         print_success "Nginx container restarted"
     else
         print_error "Failed to restart nginx container"
@@ -119,7 +111,7 @@ configure_dashboard_embedding() {
 
     # Wait for container to be healthy
     print_step "Waiting for nginx to be ready..."
-    sleep 5
+    sleep 3
 
     # Verify container is running
     if sg docker -c "docker compose ps nginx" | grep -q "Up"; then
