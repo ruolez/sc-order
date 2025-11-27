@@ -9,14 +9,22 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Configuration
+NGINX_CONF="./nginx/nginx.conf"
+INSTALL_DIR=$(pwd)
+
 # Script banner
-echo -e "${BLUE}"
-echo "╔════════════════════════════════════════════════╗"
-echo "║   SC-Order Installation Script                 ║"
-echo "║   Inventory Management System                  ║"
-echo "║   Ubuntu 24.04 LTS                             ║"
-echo "╚════════════════════════════════════════════════╝"
-echo -e "${NC}"
+print_banner() {
+    echo -e "${BLUE}"
+    echo "╔════════════════════════════════════════════════╗"
+    echo "║   SC-Order Installation Script                 ║"
+    echo "║   Inventory Management System                  ║"
+    echo "║   Ubuntu 24.04 LTS                             ║"
+    echo "╚════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+}
+
+print_banner
 
 # Check if running as root
 if [[ $EUID -eq 0 ]]; then
@@ -49,6 +57,88 @@ print_warning() {
 # Function to print errors
 print_error() {
     echo -e "${RED}✗ $1${NC}"
+}
+
+# Function to configure dashboard embedding for iframe support
+configure_dashboard_embedding() {
+    echo -e "\n${BLUE}╔════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║   Configure Dashboard Embedding                ║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════════════╝${NC}\n"
+
+    # Check if nginx config exists
+    if [[ ! -f "${NGINX_CONF}" ]]; then
+        print_error "Nginx configuration not found at ${NGINX_CONF}"
+        print_warning "Please run installation first"
+        return 1
+    fi
+
+    # Ask for dashboard IP
+    echo "Enter the IP address of the dashboard that will embed this application"
+    echo "Example: 192.168.1.110"
+    read -p "Dashboard IP: " DASHBOARD_IP
+
+    # Validate IP address format
+    if [[ ! $DASHBOARD_IP =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        print_error "Invalid IP address format"
+        return 1
+    fi
+
+    print_step "Configuring nginx to allow iframe embedding from ${DASHBOARD_IP}..."
+
+    # Create backup of nginx config
+    cp "${NGINX_CONF}" "${NGINX_CONF}.backup.$(date +%Y%m%d_%H%M%S)"
+    print_success "Created backup of nginx configuration"
+
+    # Remove existing X-Frame-Options headers
+    sed -i '/add_header X-Frame-Options/d' "${NGINX_CONF}"
+
+    # Remove existing frame-ancestors CSP headers
+    sed -i '/add_header Content-Security-Policy.*frame-ancestors/d' "${NGINX_CONF}"
+
+    # Add new Content-Security-Policy header after "server_name" line
+    sed -i "/server_name/a\\    add_header Content-Security-Policy \"frame-ancestors 'self' http://${DASHBOARD_IP}\" always;" "${NGINX_CONF}"
+
+    print_success "Updated nginx configuration"
+
+    # Rebuild and restart nginx container
+    print_step "Rebuilding nginx container..."
+    if sg docker -c "docker compose build --no-cache nginx" 2>&1; then
+        print_success "Nginx container rebuilt"
+    else
+        print_error "Failed to rebuild nginx container"
+        return 1
+    fi
+
+    print_step "Restarting nginx container..."
+    if sg docker -c "docker compose up -d nginx" 2>&1; then
+        print_success "Nginx container restarted"
+    else
+        print_error "Failed to restart nginx container"
+        return 1
+    fi
+
+    # Wait for container to be healthy
+    print_step "Waiting for nginx to be ready..."
+    sleep 5
+
+    # Verify container is running
+    if sg docker -c "docker compose ps nginx" | grep -q "Up"; then
+        print_success "Nginx container is running"
+    else
+        print_warning "Nginx container may still be starting"
+    fi
+
+    echo -e "\n${GREEN}╔════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║   Dashboard Embedding Configured! ✓            ║${NC}"
+    echo -e "${GREEN}╚════════════════════════════════════════════════╝${NC}\n"
+
+    echo -e "${BLUE}Configuration Applied:${NC}"
+    echo "  • Dashboard IP: http://${DASHBOARD_IP}"
+    echo "  • This application can now be embedded in iframes from that dashboard"
+    echo ""
+    echo -e "${YELLOW}Note:${NC} If you need to allow multiple dashboards, edit ${NGINX_CONF}"
+    echo "      and add additional IPs to the frame-ancestors directive."
+    echo ""
 }
 
 # Function to update application from GitHub
@@ -266,9 +356,10 @@ if [ "$EXISTING_INSTALL" = true ]; then
     echo "What would you like to do?"
     echo "  [1] Update from GitHub (pull latest code, keep data)"
     echo "  [2] Fresh Install (remove everything and start clean)"
-    echo "  [3] Cancel"
+    echo "  [3] Configure Dashboard Embedding (Allow Iframe)"
+    echo "  [4] Cancel"
     echo ""
-    read -p "Choose an option [1/2/3]: " -n 1 -r INSTALL_CHOICE
+    read -p "Choose an option [1/2/3/4]: " -n 1 -r INSTALL_CHOICE
     echo ""
 
     case $INSTALL_CHOICE in
@@ -334,6 +425,11 @@ if [ "$EXISTING_INSTALL" = true ]; then
             echo ""
             ;;
         3)
+            # Configure Dashboard Embedding
+            configure_dashboard_embedding
+            exit 0
+            ;;
+        4)
             # Cancel
             print_error "Installation cancelled"
             exit 0
